@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import shutil
 import sys
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -18,6 +19,10 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from core import analyzer, config, detector, downloader, pipeline
 from core.engines import ENGINES, ORDER
+
+# Side files worth keeping next to the lift.
+ARTIFACTS = ("strings.txt", "analysis.txt", "trace.txt", "report.json",
+             "job.json")
 
 
 def _print_analysis(res: pipeline.JobResult) -> None:
@@ -27,6 +32,15 @@ def _print_analysis(res: pipeline.JobResult) -> None:
     if det.evidence:
         print("evidence : " + "; ".join(det.evidence[:4]))
     print(f"time     : {res.seconds:.1f}s")
+    q = res.quality
+    if q:
+        flags = ["parses" if q.parses else "no parse"]
+        if q.placeholders:
+            flags.append(f"{q.placeholders} opaque block(s)")
+        if q.report:
+            flags.append("report only")
+        print(f"quality  : {q.score:.2f} ({q.code_lines} code lines, "
+              + ", ".join(flags) + ")")
     if res.partial:
         print("partial  : engine hit an anti-tamper gate")
     if res.note and not res.ok:
@@ -38,6 +52,16 @@ def _print_analysis(res: pipeline.JobResult) -> None:
             print(f"  [{f.severity}] {f.label} x{f.count}")
             for s in f.samples[:2]:
                 print("      " + s)
+
+
+def _copy_artifacts(res: pipeline.JobResult, out: str, stem: str) -> None:
+    os.makedirs(out, exist_ok=True)
+    for art in res.artifacts:
+        base = os.path.basename(art)
+        if base in ARTIFACTS and os.path.isfile(art):
+            dst = os.path.join(out, f"{stem}.{base}")
+            shutil.copyfile(art, dst)
+            print(f"artifact : {dst}")
 
 
 async def _main(args: argparse.Namespace) -> int:
@@ -70,24 +94,19 @@ async def _main(args: argparse.Namespace) -> int:
     res = await pipeline.run_job(path, trace=args.trace,
                                  force_engine=args.engine)
     _print_analysis(res)
+    out = args.out or os.path.dirname(os.path.abspath(src))
+    stem = os.path.splitext(name)[0]
     if not res.ok:
-        print("\nno output produced. workdir: " + job_dir)
+        print("\nno complete lift. " + (res.note or ""))
+        _copy_artifacts(res, out, stem)
         return 1
 
-    out = args.out or os.path.dirname(os.path.abspath(src))
     os.makedirs(out, exist_ok=True)
-    stem = os.path.splitext(name)[0]
     target = os.path.join(out, f"{stem}.deobf.lua")
     with open(res.main, "rb") as rf, open(target, "wb") as wf:
         wf.write(rf.read())
     print(f"\noutput   : {target}")
-    for art in res.artifacts:
-        base = os.path.basename(art)
-        if base in ("strings.txt", "analysis.txt", "report.json", "job.json"):
-            dst = os.path.join(out, f"{stem}.{base}")
-            with open(art, "rb") as rf, open(dst, "wb") as wf:
-                wf.write(rf.read())
-            print(f"artifact : {dst}")
+    _copy_artifacts(res, out, stem)
     return 0
 
 

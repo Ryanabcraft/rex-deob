@@ -93,6 +93,55 @@ later has a better claim on that family. A partial result is still delivered
 when no engine does better, but it is labelled `Partial`, the Discord embed
 shows the score, and `job.json` records it.
 
+## Recovery report (`trace.txt`)
+
+Every job — complete or not — ships a `trace.txt` next to the artifact
+(`core/trace.py`). When the lift is partial it is the most useful file in the
+reply: it says what the input is, how far the lift got, and what the script
+carries.
+
+```
+-- recovery report
+input: +1 Speed Keyboard Escape.lua
+sha256: 58e9c396dc40ddaf46c2c8f26248c079c30f1b05c56419a29c7729cf2eda673b
+size: 543745 bytes
+
+-- detection
+family: Luraph v15 header
+confidence: 0.99
+evidence: Luraph v15 header (0.99); Luraph VM dispatch shape (0.80)
+
+-- lift
+engine: luraph15
+score: 0.74
+code lines: 5403
+parses: True
+opaque blocks: 1
+complete: False
+
+-- recovered from the input (static, nothing executed)
+literals: 2000 (capped at 2000)
+urls: 1
+decoded payloads: 0
+
+-- urls
+  https://lura.ph/
+
+-- indicators
+  [HIGH] Executor HTTP API x6
+  ...
+
+-- why this is not a full lift
+  1 unlifted block(s) kept as placeholders
+```
+
+When no engine returns a complete lift, the pipeline also runs the static
+`strings` engine into a scratch directory (`work/<job>/recover/`) purely to fill
+the *recovered* section, and ships the result as `strings.txt`. Nothing is
+executed for that — it is literal, URL and payload extraction from the input
+bytes. If the job fails outright, the reply still carries `trace.txt` and
+`strings.txt` instead of only an error line.
+
 ## Tests
 
 `tests/corpus/` holds labelled samples per family and `tests/run_corpus.py`
@@ -105,6 +154,7 @@ measures the engines, skipping the universal fallbacks:
 .\.venv\Scripts\python.exe tests\run_corpus.py -f wearedevs
 .\.venv\Scripts\python.exe tests\run_terrorlua.py --per-family 3 --max-kb 200
 .\.venv\Scripts\python.exe tests\test_quality.py
+.\.venv\Scripts\python.exe tests\test_trace.py
 ```
 
 ## Requirements
@@ -213,7 +263,7 @@ place to look when an engine refuses a script.
 ```
 bot.py              Discord front end
 cli.py              same pipeline without Discord
-core/               detection, adapters, pipeline, analyzer, downloader
+core/               detection, adapters, pipeline, quality scoring, trace report
 engines/luraph15/   Luraph v15 / v15.1 deobfuscator
 engines/luraph14/   Luraph v14 / IronBrew engine
 engines/prometheus/ Prometheus / WeAreDevs (pdeobf)

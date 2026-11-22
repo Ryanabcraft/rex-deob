@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from . import analyzer, config, detector, quality
+from . import analyzer, config, detector, quality, trace
 from .engines import ENGINES, ORDER, RunOutcome, _run
 
 Progress = Callable[[int, str], Awaitable[None]]
@@ -121,6 +121,39 @@ def _relocate(job_dir: str, outcome: RunOutcome) -> None:
             shutil.move(src, dst)
         except OSError:
             shutil.copyfile(src, dst)
+
+
+async def _recover(job_dir: str, input_path: str, result: JobResult) -> None:
+    """Harvest literals from the input when the lift is not complete.
+
+    Runs the static `strings` engine into its own subdirectory so it cannot
+    overwrite the chosen candidate, and leaves the result as `strings.txt`.
+    """
+    dest = os.path.join(job_dir, "strings.txt")
+    if os.path.exists(dest):
+        if dest not in result.artifacts:
+            result.artifacts.append(dest)
+        return
+    eng = ENGINES.get("strings")
+    if eng is None:
+        return
+    ok, _ = eng.available()
+    if not ok:
+        return
+    sub = os.path.join(job_dir, "recover")
+    os.makedirs(sub, exist_ok=True)
+    try:
+        outcome = await eng.run(sub, input_path, False,
+                                config.TIMEOUTS.get("strings", 120))
+    except Exception:
+        return
+    if not outcome.ok or not outcome.main:
+        return
+    try:
+        shutil.copyfile(outcome.main, dest)
+    except OSError:
+        return
+    result.artifacts.append(dest)
 
 
 def _snapshot(job_dir: str, idx: int, outcome: RunOutcome) -> str:
@@ -278,6 +311,8 @@ async def run_job(input_path: str, trace: bool = False,
         try:
             body = decode(open(outcome.main, "rb").read())
             result.analysis = analyzer.analyze(body)
+            if not q.complete:
+                await _recover(job_dir, input_path, result)
             await _write_reports(job_dir, result)
         except OSError:
             pass
@@ -300,6 +335,7 @@ async def run_job(input_path: str, trace: bool = False,
     result.seconds = time.time() - started
     result.stdout = "\n".join(
         f"{a.engine}: {'ok' if a.ok else a.note}" for a in attempts)
+    await _recover(job_dir, input_path, result)
     await _write_reports(job_dir, result)
     return result
 
@@ -316,6 +352,18 @@ async def _write_reports(job_dir: str, result: JobResult) -> None:
         p = os.path.join(job_dir, "analysis.txt")
         if p not in result.artifacts:
             result.artifacts.append(p)
+
+    try:
+        body = decode(open(result.main, "rb").read()) if result.main else ""
+    except OSError:
+        body = ""
+    try:
+        text = trace.build(result.input_path, result, body)
+        p = trace.write(job_dir, text)
+        if p not in result.artifacts:
+            result.artifacts.append(p)
+    except OSError:
+        pass
 
     meta = {
         "engine": result.engine,

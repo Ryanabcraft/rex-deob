@@ -262,8 +262,11 @@ async def _run_and_send(ctx: commands.Context, trace: bool, force: str | None,
 
         if not res.ok:
             note = res.note[:1500] or "no engine produced output"
-            await status.edit(content=f"failed: {note}\nworkdir: `{job_dir}`",
+            files = _pack_files(res, name)
+            await status.edit(content=f"no complete lift: {note}\nworkdir: `{job_dir}`",
                               embed=None)
+            if files:
+                await ctx.reply(files=files)
             return
 
         files = _pack_files(res, name)
