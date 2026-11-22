@@ -1,9 +1,11 @@
 @echo off
 cd /d "%~dp0"
-if not exist ".venv\Scripts\python.exe" (
+set "PY=.venv\Scripts\python.exe"
+if not exist "%PY%" set "PY=.venv\bin\python.exe"
+if not exist "%PY%" (
   echo venv missing - run install.ps1 first
   pause
   exit /b 1
 )
-".venv\Scripts\python.exe" bot.py
+"%PY%" bot.py
 pause
