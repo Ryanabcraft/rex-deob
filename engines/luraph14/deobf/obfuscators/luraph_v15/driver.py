@@ -77,9 +77,20 @@ def patch_entries(source, path):
         code += ("if __PA and not __PA[%s] then __PA[%s]={};__PA.n=__PA.n+1;__PA[%s].__seq=__PA.n;"
                  "__PA[%s].__maker=\"%s@%d,%d\";__PK[%s]=%s;%s end "
                  % (pv, pv, pv, pv, tag, l2, c2, info.get("pf_key", pv), var, cap))
-        edits.append((l2, c2, code))
-    for l, c, code in sorted(edits, reverse=True):
-        lines[l] = lines[l][:c] + code + lines[l][c:]
+        if info.get("ret"):
+            # v15.2: `return function...end` -> `__MK[1]=function...end;<hooks> return __MK[1]`
+            rl, rc, cc = info["ret"]
+            if lines[rl][rc:cc].strip() != "return":
+                print("[!] unexpected text before a maker closure: %r" % lines[rl][rc:cc], file=sys.stderr)
+                continue
+            edits.append((rl, rc, "__MK[1]=", cc))
+            # (the return statement's own location already ends after its optional `;`)
+            edits.append((l2, c2, code + " return __MK[1] ", c2))
+        else:
+            edits.append((l2, c2, code, c2))
+    edits = [e if len(e) == 4 else e + (e[1],) for e in edits]
+    for l, c, code, end in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+        lines[l] = lines[l][:c] + code + lines[l][end:]
     return "\n".join(lines)
 
 

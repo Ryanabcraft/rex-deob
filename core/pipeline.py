@@ -272,7 +272,8 @@ async def run_job(input_path: str, trace: bool = False,
                                     time.time() - t0))
             continue
         body = decode(open(outcome.main, "rb").read())
-        q = quality.assess(body, await _parses(outcome.main), outcome.partial)
+        q = quality.assess(body, await _parses(outcome.main), outcome.partial,
+                           name)
         if len(raw) > 262144 and q.code_lines < quality.MIN_CODE_LINES:
             attempts.append(Attempt(name, False,
                                     "truncated: large input, "

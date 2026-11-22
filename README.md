@@ -43,7 +43,7 @@ and link-local targets, follows at most 5 redirects, and stops at
 | `bytecode` | raw `.luac` / Luau bytecode → source (Rust luadec) | bundled exe |
 | `luraph15` | Luraph v15 / v15.1, devirtualization + polish | node + bundled luau |
 | `ib1` | IronBrew1 static payload → IR + all constants | python |
-| `luraph14` | Luraph v14, generic VM traces | python + bundled luau |
+| `luraph14` | Luraph v14 / v15 / v15.1 / v15.2, generic VM traces, IronBrew 1 | python + bundled luau |
 | `ib2net` | IronBrew 2 devirtualizer (LuaAnalysis) | prebuilt .NET |
 | `ironbrew2` | IronBrew 2.7.0–2.7.2 / AztupBrew (fallback) | python (luaparser) |
 | `prometheus` | Prometheus / WeAreDevs (pdeobf → wad dumper → promjs → leakd) | node + python |

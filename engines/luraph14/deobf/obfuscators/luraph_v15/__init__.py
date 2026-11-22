@@ -10,6 +10,14 @@ HEADER_LINE = re.compile(r"\s*--[ \t]*This file was protected using Luraph Obfus
                          r"\[https?://lura\.ph/?\]")
 
 
+JUNKIE_KEY = re.compile(
+    r"""[ \t]*getgenv[ \t]*\([ \t]*\)[ \t]*\.[ \t]*SCRIPT_KEY[ \t]*=[ \t]*"""
+    r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[A-Za-z_]\w*|[-+]?\d+(?:\.\d+)?|nil|true|false)"""
+    r"""[ \t]*;?[ \t]*(?:--.*)?"""
+)
+VM_PAYLOAD = re.compile(r"^[ \t]*return[ \t]+setmetatable[ \t]*\(", re.M)
+
+
 class LuraphV15(Obfuscator):
     name = "luraph_v15"
     label = "Luraph v15"
@@ -46,11 +54,58 @@ class LuraphV15(Obfuscator):
         from obfuscators.luraph_v15 import driver
         fixed = restore_header_newline(job.source)
         if fixed != job.source:
-            # the copy keeps the input's name (Path2D cache, messages use job.input)
             print("[*] header comment ran into the code (lost newline): split it", file=sys.stderr)
+
+        fixed, key_removed = strip_junkie_script_key(fixed)
+        if key_removed:
+            print("[*] ignored owner-injected getgenv().SCRIPT_KEY before the Luraph payload",
+                  file=sys.stderr)
+
+        if fixed != job.source:
+            # Keep source_path byte-for-byte aligned with the text being instrumented.
+            # The copy keeps the input's name (Path2D cache, messages use job.input).
             job.source = fixed
             job.source_path = job.write(job.path(".src.lua"), fixed, encoding="latin-1")
         return driver.run(job)
+
+
+def strip_junkie_script_key(source):
+    """Remove only the standalone Junkie key line injected before a Luraph VM.
+
+    The assignment is stripped only when it is the first executable line
+    after a Luraph header and the next executable line is the VM bootstrap.
+    Other SCRIPT_KEY uses and ordinary Luau source are left untouched.
+    """
+    header = HEADER.search(source[:500])
+    if not header:
+        return source, False
+
+    header_end = source.find("\n", header.end())
+    if header_end < 0:
+        return source, False
+
+    start = header_end + 1
+    payload = VM_PAYLOAD.search(source, start)
+    if not payload:
+        return source, False
+
+    pos = start
+    for line in source[start:payload.start()].splitlines(keepends=True):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("--"):
+            pos += len(line)
+            continue
+        if not JUNKIE_KEY.fullmatch(line.rstrip("\r\n")):
+            return source, False
+
+        # Between the key and VM bootstrap there must be comments/blank lines only.
+        tail = source[pos + len(line):payload.start()]
+        if any(part.strip() and not part.lstrip().startswith("--")
+               for part in tail.splitlines()):
+            return source, False
+        return source[:pos] + source[pos + len(line):], True
+
+    return source, False
 
 
 def restore_header_newline(source):

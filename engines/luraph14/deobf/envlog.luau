@@ -3500,10 +3500,7 @@ end
 -- line: {"protos": {pid: {name: value}}, "tables": {id: {...}}, ...}
 E.__PA = CFG.devirt and { n = 0 } or false
 E.__PK = {}     -- proto -> its first closure (maker hook; see CHAIN callPath)
--- v14: main-level helper values the lifter needs (patch_snapshots writes
--- `__SNAP[id]=value` after each main top-level statement; the devirtualizer
--- reads the captured copy as cap.__SN)
-E.__SNAP = CFG.devirt and {} or false
+E.__MK = {}     -- v15.2 makers `return function(...)`: the closure waits in __MK[1] while the hooks run
 if E.__PA then
 	-- Copy of each proto's number arrays (instructions, operands) when its
 	-- first closure is made (`__PA[proto]={}` in the maker runs this

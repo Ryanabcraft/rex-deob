@@ -514,15 +514,6 @@ class Scope:
         return None
 
 
-def fmt_val(v):
-    try:
-        if isinstance(v, (int, float, bool)) or v is None:
-            return repr(v)
-        return type(v).__name__ + ":" + (repr(v)[:40] if not isinstance(v, Expr) else repr(v)[:40])
-    except Exception:
-        return type(v).__name__
-
-
 class Interp:
     """Evaluates AST nodes. Hooks for the VM-specific parts:
       special[decl_key] -> "sink" (reads nil, writes ignored) or
@@ -665,8 +656,7 @@ class Interp:
             b = self.eval(st["to"], scope)
             c = self.eval(st["step"], scope) if st.get("step") else 1
             if is_sym(a) or is_sym(b) or is_sym(c):
-                raise Unsupported("numeric for with symbolic bounds at %s (%s..%s step %s)" % (
-                    st.get("location"), fmt_val(a), fmt_val(b), fmt_val(c)))
+                raise Unsupported("numeric for with symbolic bounds")
             i = a
             n = 0
             while (c > 0 and i <= b) or (c <= 0 and i >= b):

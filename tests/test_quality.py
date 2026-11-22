@@ -52,6 +52,12 @@ def main() -> int:
     empty = quality.assess("-- nothing here\n", parses=True, partial=True)
     check(not empty.acceptable, "no code lines = not acceptable")
 
+    # A dump is a report even when it has control-flow words inside literals.
+    dumpy = quality.assess(GOOD, parses=True, engine="strings")
+    check(dumpy.report, "strings output is a report by definition")
+    check(not dumpy.complete, "a report is never the source")
+    check(dumpy.score < good.score, "report scores below a real lift")
+
     tiny = quality.assess("return 1\n", parses=True)
     check(tiny.acceptable and tiny.complete, "small script can be complete")
 

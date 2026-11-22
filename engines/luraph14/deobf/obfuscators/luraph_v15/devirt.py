@@ -122,6 +122,21 @@ class Dump:
                     late[(int(tid), key)] = v
         return late
 
+    def capture_for(self, proto):
+        """Captured maker environment for a proto table, if it was observed.
+
+        The harness keys __PA by the proto table itself. pid_of_table maps that
+        table's serialized id back to the corresponding protos entry.
+        """
+        tid = getattr(proto, "tid", None)
+        if tid is None:
+            return None
+        pid = self.pid_of_table.get(int(tid))
+        if pid is None:
+            return None
+        cap = self.protos.get(str(pid))
+        return cap if cap is not None else self.protos.get(pid)
+
     def _load_tables(self, tables):
         for tid in tables:
             self.tables[int(tid)] = LTable(tid=int(tid))
@@ -417,10 +432,15 @@ class VMModel:
         self.info = info
         self.maker = info["maker"]
         self.vm = info["vm"]
+        self.scope = info.get("scope")
+        self.scope_decls = (vmmap._scope_decls(self.scope) if self.scope
+                            else vmmap._decls_in(self.maker))
+        self.capture_decls = tuple(info.get("capture_decls") or ())
+        self.capture_names = tuple(info.get("captures") or ())
         self.dispatch = {id(n) for n in dispatch_nodes}
         self.ctor_funcs = ctor_funcs
         self.maker_decls = {}
-        for k, nm in vmmap._decls_in(self.maker).items():
+        for k, nm in self.scope_decls.items():
             self.maker_decls.setdefault(nm, []).append(k)
         body = self.vm["body"]["body"]
         # prologue ... local V,c,I,j,J = T(function(...) <loops> end, ...) ; post
@@ -519,9 +539,41 @@ class VMModel:
     def is_dispatch(self, node):
         return id(node) in self.dispatch
 
-    # The maker is called as maker(vm, proto, upvals) in one layout; another
-    # repeats parameter names, function(g, d, d, d, d, j): only the last `d`
-    # is visible (the proto) and the upvalue list follows it.
+    def vmobj_name(self):
+        """Name of the VM object in the scope captured by the maker."""
+        if self.scope and self.scope[0].get("args"):
+            # v15.2: outer function(t, opcode arrays..., ...) -> maker(...)
+            return self.scope[0]["args"][0]["name"]
+        return self.maker["args"][0]["name"]
+
+    def scope_from_capture(self, cap):
+        """Rebuild the maker's lexical environment from the __PA snapshot.
+
+        Scope is keyed by luau-ast declaration locations, not source names.
+        The hook writes only unambiguous captured names. Missing table fields
+        represent Lua nil and must still be bound to avoid false unbound-local
+        errors.
+        """
+        if not self.scope:
+            return None
+        env = Scope()
+        if self.capture_decls:
+            # Declaration identity matters when the obfuscator repeats a local
+            # name in nested scopes; only the binding visible at the maker hook
+            # should receive the serialized value.
+            for key, name in self.capture_decls:
+                env.vars[key] = cap.get(name)
+        else:
+            # Backwards compatibility for older maker metadata.
+            wanted = set(self.capture_names)
+            for key, name in self.scope_decls.items():
+                if name in wanted:
+                    env.vars[key] = cap.get(name)
+        return env
+
+    # The maker is called as maker(vm, proto, upvals) in the v15 layout;
+    # v15.2 identifies its proto by the opcode array captured from the outer
+    # function, not by one of the maker's numeric seed parameters.
     def proto_index(self):
         return self.info.get("proto_index", 1)
 
@@ -536,10 +588,15 @@ class VMModel:
 
     def proto_of(self, cap):
         p = cap.get("self")
-        return p if p is not None else cap.get(self.maker["args"][self.proto_index()]["name"])
+        if p is not None:
+            return p
+        name = self.info.get("proto")
+        if name:
+            return cap.get(name)
+        return cap.get(self.maker["args"][self.proto_index()]["name"])
 
     def vmobj_of(self, cap):
-        return cap.get(self.maker["args"][0]["name"])
+        return cap.get(self.vmobj_name())
 
 
 def find_ctor_funcs(root):
@@ -706,7 +763,18 @@ class ProtoLifter:
             # where it was made
             self.maker_scope = proto.env
             return
-        # run the closure maker itself: maker(e, proto, upvals) returns the VM
+        if getattr(vm, "scope", None):
+            # Luraph v15.2: the per-proto maker is nested in an outer factory
+            # and takes numeric state seeds, not (vmobj, proto, upvals).
+            # patch_entries captures values visible when the interpreter
+            # closure is created, so rebuild that lexical environment directly.
+            cap = dump.capture_for(proto)
+            if cap is None:
+                raise Unsupported("no captured v15.2 maker scope for proto table %s" %
+                                  getattr(proto, "tid", None))
+            self.maker_scope = vm.scope_from_capture(cap)
+            return
+        # run the v15 closure maker itself: maker(e, proto, upvals) returns the VM
         # closure, whose environment is the maker scope with every array bound
         it = S.Interp(self)
         self.making = True
@@ -2696,14 +2764,15 @@ class Program:
                 self.vms[tag] = vm
                 self.ctors[id(vm)] = ctor
                 vm.src_lines = lines
-        self.dump.vm_names = {vm.maker["args"][0]["name"] for vm in self.vms.values()}
+        self.dump.vm_names = {vm.vmobj_name() for vm in self.vms.values()}
         # bind Lua function values of the VM object to their AST
         for cap in self.dump.protos.values():
             try:
-                e = cap.get(self.vm_of(cap).maker["args"][0]["name"])
+                vm = self.vm_of(cap)
+                e = vm.vmobj_of(cap)
             except (KeyError, AttributeError, IndexError):
                 continue
-            ctor = self.ctors[id(self.vm_of(cap))]
+            ctor = self.ctors[id(vm)]
             if isinstance(e, LTable):
                 for k, v in e.h.items():
                     if isinstance(v, OpaqueFn) and v.node is None and k in ctor:

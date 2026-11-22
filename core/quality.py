@@ -28,6 +28,9 @@ CONTROL = re.compile(r"\b(?:function|if|for|while|repeat|return|and|or|not)\b")
 # Below this many code lines, a large input means the engine gave up early.
 MIN_CODE_LINES = 20
 
+# Engines whose output is a report about the input, never source.
+REPORT_ENGINES = frozenset({"strings", "unveilr"})
+
 
 @dataclass
 class Quality:
@@ -50,8 +53,13 @@ def count_code_lines(text: str) -> int:
                if ln.strip() and not COMMENT.match(ln))
 
 
-def assess(text: str, parses: bool, partial: bool = False) -> Quality:
-    """Score one engine output. `parses` comes from luau-ast in the pipeline."""
+def assess(text: str, parses: bool, partial: bool = False,
+           engine: str | None = None) -> Quality:
+    """Score one engine output. `parses` comes from luau-ast in the pipeline.
+
+    `engine` marks dumps that are reports by definition (`strings`, `unveilr`):
+    they describe the input, they are never the source, whatever their size.
+    """
     lines = text.splitlines()
     code_lines = sum(1 for ln in lines if ln.strip() and not COMMENT.match(ln))
     comment_lines = sum(1 for ln in lines if COMMENT.match(ln))
@@ -59,8 +67,10 @@ def assess(text: str, parses: bool, partial: bool = False) -> Quality:
     raw_names = len(RAW_NAME.findall(text))
 
     # A literals/behaviour dump: assignments with no control flow at all. Still
-    # useful, but never "the source".
-    report = ((code_lines > 10 and not CONTROL.search(text))
+    # useful, but never "the source". Engines that only ever report (strings,
+    # unveilr) are reports by definition, whatever their line count.
+    report = (engine in REPORT_ENGINES
+              or (code_lines > 10 and not CONTROL.search(text))
               or (code_lines > 5 and comment_lines > code_lines * 4))
 
     acceptable = code_lines > 0

@@ -262,23 +262,41 @@ def instrument_everything(src, root, make_post, make_loop):
     return _re.sub(r"while true do (?:local )?([A-Za-z_]+)(?:,[A-Za-z_]+)*=([A-Za-z_]+)\[([A-Za-z_]+)\];", rep, out)
 
 
+def _return_key(stack, oi, arr):
+    """Luraph v15.2: the maker (stack[oi]) returns the interpreter directly and
+    its own parameters are only per-closure numbers (initial pc, state seeds).
+    The proto's data (opcode and operand arrays) are parameters of the function
+    around the maker, so the key that tells protos apart is the opcode array
+    the dispatcher indexes. None when stack[oi] does not have that shape."""
+    body = stack[oi]["body"]["body"]
+    if oi + 1 >= len(stack) or not body or body[-1]["type"] != "AstStatReturn" \
+            or len(body[-1].get("list", [])) != 1 or body[-1]["list"][0] is not stack[oi + 1]:
+        return None
+    if arr not in set(_scope_decls(stack[:oi + 1]).values()):
+        return None
+    return arr
+
+
 def closure_entries(root):
     """For each VM interpreter closure: (line, col of its first statement, proto variable name)."""
-    disp_nodes = [d["node"] for d in find_dispatchers(root)]
+    disps = {id(d["node"]): d for d in find_dispatchers(root)}
     seen = {}
 
     def walk(n, stack):
         if isinstance(n, dict):
             if n.get("type") == "AstExprFunction":
                 stack = stack + [n]
-            if n.get("type") == "AstStatWhile" and any(n is d for d in disp_nodes):
+            if n.get("type") == "AstStatWhile" and id(n) in disps:
                 inner = next(f for f in reversed(stack) if f.get("vararg") and not f["args"])
                 outer = next(f for f in reversed(stack) if len(f["args"]) >= 2)
                 l1, c1, _, _ = loc(inner["body"]["body"][0])
                 # keyed by the proto parameter: parameter 1 is not always the
                 # proto (function(g, upvals, proto, ...)), and an upvalue list
                 # can be shared or false, which would merge protos
-                seen[(l1, c1)] = outer["args"][_maker_params(outer)[0]]["name"]
+                oi = max(i for i, f in enumerate(stack) if f is outer)
+                key = _return_key(stack, oi, disps[id(n)]["arr"])
+                if (l1, c1) not in seen:
+                    seen[(l1, c1)] = key or outer["args"][_maker_params(outer)[0]]["name"]
             for v in n.values():
                 walk(v, stack)
         elif isinstance(n, list):
@@ -334,7 +352,7 @@ def maker_info(root):
      "maker": maker AstExprFunction, "vm": the VM closure AstExprFunction,
      "captures": [maker-level local names the VM closure uses]}.
     Only names that are not shadowed at the insertion point are returned."""
-    disp_nodes = [d["node"] for d in find_dispatchers(root)]
+    disps = {id(d["node"]): d for d in find_dispatchers(root)}
     out = {}
 
     def walk(n, stack, stmts):
@@ -344,7 +362,7 @@ def maker_info(root):
                 stack = stack + [n]
             if t and t.startswith("AstStat"):
                 stmts = stmts + [(n, len(stack))]
-            if t == "AstStatWhile" and any(n is d for d in disp_nodes):
+            if t == "AstStatWhile" and id(n) in disps:
                 oi = max(i for i, f in enumerate(stack) if len(f["args"]) >= 2)
                 if oi + 1 < len(stack):
                     clo = stack[oi + 1]
@@ -363,6 +381,22 @@ def maker_info(root):
                                                      # closure -> proto attribution must use the same
                                                      "pf_key": stack[oi]["args"][pi]["name"],
                                                      "maker": stack[oi], "vm": clo, "stmt": st}
+                    elif st and st["type"] == "AstStatReturn" and len(st.get("list", [])) == 1 \
+                            and st["list"][0] is clo:
+                        # Luraph v15.2: the maker returns the interpreter directly
+                        # (`return function(...) ... end`), usually inside an outer
+                        # function that holds the operand arrays. The hook turns the
+                        # return into `__MK[1] = function ... end; <hooks>; return __MK[1]`.
+                        l1, c1, l2, c2 = loc(st)
+                        cl1, cc1, _, _ = loc(clo)
+                        if (l2, c2) not in out and l1 == cl1 == l2:
+                            pi, ui = _maker_params(stack[oi])
+                            pk = _return_key(stack, oi, disps[id(n)]["arr"]) or stack[oi]["args"][pi]["name"]
+                            out[(l2, c2)] = {"at": (l2, c2), "var": "__MK[1]", "ret": (l1, c1, cc1),
+                                             "proto": pk, "proto_index": pi, "upvals_index": ui,
+                                             "pf_key": pk,
+                                             "maker": stack[oi], "vm": clo, "stmt": st,
+                                             "scope": stack[:oi + 1]}
             for v in n.values():
                 walk(v, stack, stmts)
         elif isinstance(n, list):
@@ -370,7 +404,8 @@ def maker_info(root):
                 walk(v, stack, stmts)
     walk(root, [], [])
     for info in out.values():
-        info["captures"] = _captures(info)
+        info["capture_decls"] = _capture_decls(info)
+        info["captures"] = sorted({name for _, name in info["capture_decls"]})
     return list(out.values())
 
 
@@ -453,8 +488,31 @@ def _decls_in(fn):
     return keys
 
 
-def _captures(info):
-    maker_decls = _decls_in(info["maker"])
+def _scope_decls(fns):
+    """Declarations visible at the end of the innermost function of fns (the
+    makers' enclosing functions included). Of repeated parameter names only
+    the last one can be referenced."""
+    decls = {}
+    for fn in fns:
+        d = _decls_in(fn)
+        last = {a["name"]: decl_key(a) for a in fn["args"]}
+        for a in fn["args"]:
+            if last[a["name"]] != decl_key(a):
+                d.pop(decl_key(a), None)
+        decls.update(d)
+    return decls
+
+
+def _capture_decls(info):
+    """Declarations used by the maker/VM closure that are visible at its hook.
+
+    The hook executes at the maker's return site. If a name is redeclared in
+    an inner function scope, the last declaration in the enclosing scope chain
+    is the one a source-level reference at that point resolves to. Keep the
+    declaration identity as well as its spelling so the lifter does not bind
+    unrelated shadowed locals to the same captured value.
+    """
+    maker_decls = _scope_decls(info["scope"]) if info.get("scope") else _decls_in(info["maker"])
     used = {}
 
     def visit(n):
@@ -468,13 +526,34 @@ def _captures(info):
         elif isinstance(n, list):
             for v in n:
                 visit(v)
-    visit(info["vm"])
-    names = {}
-    for k, name in used.items():
-        names.setdefault(name, []).append(k)
-    # a name declared twice at maker level would be ambiguous at the insertion point
-    dup = {nm for nm, ks in names.items() if len(ks) > 1}
+
+    # v15.2: the maker's own prologue (`local U,S,... = C,y,...`) reads the
+    # enclosing function's locals, which the lifter evaluates too.
+    visit(info["maker"] if info.get("scope") else info["vm"])
+
     by_name = {}
-    for k, nm in maker_decls.items():
-        by_name.setdefault(nm, []).append(k)
-    return sorted(nm for nm in names if nm not in dup and len(by_name[nm]) == 1)
+    for key, name in maker_decls.items():
+        by_name.setdefault(name, []).append(key)
+
+    if not info.get("scope"):
+        # Preserve v15's original conservative rule: its capture hook is
+        # inside the VM closure and cannot disambiguate repeated maker names.
+        used_by_name = {}
+        for key, name in used.items():
+            used_by_name.setdefault(name, []).append(key)
+        return sorted(((key, name) for key, name in used.items()
+                       if len(used_by_name[name]) == 1 and len(by_name[name]) == 1),
+                      key=lambda item: item[0])
+
+    # v15.2's hook is inside the nested maker at its return point.
+    # _scope_decls is ordered outer-to-inner and _decls_in preserves declaration
+    # order, so the last declaration with a spelling is the binding visible
+    # to that hook. Keep only references to that exact declaration.
+    visible = {name: keys[-1] for name, keys in by_name.items() if keys}
+    return sorted(((key, name) for key, name in used.items()
+                   if visible.get(name) == key), key=lambda item: item[0])
+
+
+def _captures(info):
+    """Source names for the declaration-precise capture metadata."""
+    return sorted({name for _, name in _capture_decls(info)})

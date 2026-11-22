@@ -242,11 +242,12 @@ class Ib1(Engine):
 
 class Luraph14(Engine):
     name = "luraph14"
-    label = "Luraph v14 / IronBrew / generic"
+    label = "Luraph v14/v15 / IronBrew / generic"
     order = 20
     timeout_key = "luraph14"
     can_trace = True
-    families = ("Luraph v14 header", "IronBrew1 header", "IronBrew signature")
+    families = ("Luraph v14 header", "IronBrew1 header", "IronBrew signature",
+                "Luraph v15 header", "LPH VM macros", "Luraph VM dispatch shape")
 
     def __init__(self) -> None:
         self.dir = config.engine("luraph14")
