@@ -1,0 +1,82 @@
+{
+  "luraph15": {
+    "engine": "luraph15"
+  },
+  "luraph151": {
+    "engine": "luraph15"
+  },
+  "luraph14": {
+    "engine": "luraph14"
+  },
+  "ironbrew1": {
+    "engine": "ib1",
+    "files": {
+      "ib1_1.lua": null
+    }
+  },
+  "ironbrew2": {
+    "engine": "ib2net"
+  },
+  "ironbrew3": {
+    "engine": null,
+    "note": "parser decodes other builds; not this corpus profile"
+  },
+  "moonsec": {
+    "engine": "moonsec"
+  },
+  "wearedevs": {
+    "engine": "prometheus"
+  },
+  "prometheus": {
+    "engine": "prometheus"
+  },
+  "hercules": {
+    "engine": "hercules"
+  },
+  "moonveil21": {
+    "engine": "moonveil"
+  },
+  "moonveil1": {
+    "engine": null,
+    "note": "supported only on 2.1.x profile"
+  },
+  "ironveil": {
+    "engine": "ironveil"
+  },
+  "f77": {
+    "engine": "f77"
+  },
+  "orrxl4": {
+    "engine": "orrxl4"
+  },
+  "luaobfuscator": {
+    "engine": "luaobfuscator",
+    "files": {
+      "luaobf_1.lua": null
+    }
+  },
+  "centurion": {
+    "engine": "centurion"
+  },
+  "luarmor": {
+    "engine": "luarmor"
+  },
+  "synapsexen": {
+    "engine": "synapsexen"
+  },
+  "psu": {
+    "engine": "psu",
+    "files": {
+      "psu_1.lua": null
+    }
+  },
+  "wyn": {
+    "engine": "wyn"
+  },
+  "boronide": {
+    "engine": null
+  },
+  "lps": {
+    "engine": null
+  }
+}
