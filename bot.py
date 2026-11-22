@@ -107,7 +107,8 @@ async def _read_target(ctx: commands.Context) -> tuple[bytes, str, str | None]:
 
 def _summary_embed(res: pipeline.JobResult, source: str) -> discord.Embed:
     risk = res.analysis.risk if res.analysis else "CLEAN"
-    embed = discord.Embed(title="Deobfuscation finished",
+    embed = discord.Embed(title="Partial lift" if res.partial
+                          else "Deobfuscation finished",
                           color=COLORS.get(risk, 0x5865F2))
     embed.add_field(name="Source", value=f"`{source}`"[:1020], inline=False)
     det = res.detection
@@ -126,10 +127,20 @@ def _summary_embed(res: pipeline.JobResult, source: str) -> discord.Embed:
         embed.add_field(name="Output",
                         value=f"{res.analysis.lines} lines / "
                               f"{res.analysis.bytes} bytes", inline=True)
+    q = res.quality
+    if q:
+        flags = ["parses" if q.parses else "does not parse"]
+        if q.placeholders:
+            flags.append(f"{q.placeholders} placeholder(s)")
+        if q.report:
+            flags.append("report only")
+        embed.add_field(name="Quality",
+                        value=f"`{q.score:.2f}` · " + " · ".join(flags),
+                        inline=True)
     if res.partial:
         embed.add_field(name="Partial", inline=False,
-                        value="engine reached an anti-tamper gate; treat the "
-                              "lift as approximate")
+                        value="no engine reached a complete lift; this is the "
+                              "best result the chain produced")
     if res.note and not res.ok:
         embed.add_field(name="Note", value=res.note[:1000], inline=False)
     embed.set_footer(text="deobf bot · " + (res.engine or "no engine"))

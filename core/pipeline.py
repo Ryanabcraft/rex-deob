@@ -9,10 +9,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
-from . import analyzer, config, detector
+from . import analyzer, config, detector, quality
 from .engines import ENGINES, ORDER, RunOutcome, _run
 
 Progress = Callable[[int, str], Awaitable[None]]
+
+# Generic last-resort engines: only worth running when nothing better exists.
+FALLBACKS = {"unveilr", "strings"}
 
 
 @dataclass
@@ -34,6 +37,7 @@ class JobResult:
     analysis: analyzer.Analysis | None = None
     note: str = ""
     partial: bool = False
+    quality: quality.Quality | None = None
     attempts: list[Attempt] = field(default_factory=list)
     seconds: float = 0.0
     input_path: str = ""
@@ -79,11 +83,6 @@ def _prune(root: str, max_age_h: int) -> None:
             pass
 
 
-def _code_lines(text: str) -> int:
-    return sum(1 for ln in text.splitlines()
-               if ln.strip() and not ln.strip().startswith("--"))
-
-
 async def _parses(path: str) -> bool:
     ast = config.tool("luau-ast")
     if not os.path.exists(ast):
@@ -95,10 +94,6 @@ async def _parses(path: str) -> bool:
     except OSError:
         pass
     return code == 0 and not to
-
-
-async def _syntax_note(path: str) -> str:
-    return "" if await _parses(path) else "output does not parse with luau-ast"
 
 
 def _gather_extra(job_dir: str, main: str) -> list[str]:
@@ -128,11 +123,41 @@ def _relocate(job_dir: str, outcome: RunOutcome) -> None:
             shutil.copyfile(src, dst)
 
 
+def _snapshot(job_dir: str, idx: int, outcome: RunOutcome) -> str:
+    """Freeze one candidate's artifacts before the next engine can overwrite them.
+
+    Engines share the job directory and several of them delete or rewrite
+    `deobf.lua` on entry, so a candidate that is only chosen at the end of the
+    chain would otherwise point at a file that no longer exists.
+    """
+    if not outcome.main:
+        return job_dir
+    cand = os.path.join(job_dir, f"cand{idx}")
+    os.makedirs(cand, exist_ok=True)
+    arts: list[str] = []
+    for path in [outcome.main] + list(outcome.artifacts):
+        if not path or not os.path.isfile(path):
+            continue
+        if os.path.dirname(os.path.abspath(path)) != os.path.abspath(job_dir):
+            continue  # engine-owned subdirectory, nobody else writes there
+        dst = os.path.join(cand, os.path.basename(path))
+        try:
+            shutil.copyfile(path, dst)
+        except OSError:
+            continue
+        if path == outcome.main:
+            outcome.main = dst
+        arts.append(dst)
+    outcome.artifacts = list(dict.fromkeys(arts))
+    return cand
+
+
 async def run_job(input_path: str, trace: bool = False,
                   force_engine: str | None = None,
                   progress: Progress | None = None,
                   max_engine_seconds: int | None = None,
-                  skip_engines: set[str] | None = None) -> JobResult:
+                  skip_engines: set[str] | None = None,
+                  budget_s: float | None = None) -> JobResult:
     started = time.time()
     job_dir = new_workdir()
     input_path = os.path.abspath(input_path)
@@ -170,16 +195,16 @@ async def run_job(input_path: str, trace: bool = False,
     result = JobResult(False, det, trace=trace, input_path=input_path, workdir=job_dir)
     attempts: list[Attempt] = []
     result.attempts = attempts
-
+    budget = budget_s if budget_s is not None else max(120, config.JOB_TIMEOUT_S - 60)
+    deadline = started + budget
+    best: tuple[float, str, RunOutcome, quality.Quality, str] | None = None
+    cand_n = 0
     for name in chain:
         eng = ENGINES.get(name)
         if eng is None:
             continue
         if skip_engines and name in skip_engines:
             attempts.append(Attempt(name, False, "skipped for this run"))
-            continue
-        if trace and name == "prometheus":
-            attempts.append(Attempt(name, False, "no trace mode"))
             continue
         if trace and not eng.can_trace:
             attempts.append(Attempt(name, False, "no trace mode"))
@@ -191,12 +216,21 @@ async def run_job(input_path: str, trace: bool = False,
         if not force_engine and eng.families and not det.matches(eng.families):
             attempts.append(Attempt(name, False, "no matching fingerprint"))
             continue
-        budget = max_engine_seconds or config.TIMEOUTS.get(eng.timeout_key, 600)
+        # A partial lift is a candidate, not a verdict: hold the best one and
+        # spend the rest of the budget only on engines that could beat it.
+        if best is not None and name in FALLBACKS:
+            attempts.append(Attempt(name, False,
+                                    "skipped: better candidate already found"))
+            continue
+        if best is not None and time.time() >= deadline:
+            attempts.append(Attempt(name, False, "skipped: job budget reached"))
+            continue
+        budget_e = max_engine_seconds or config.TIMEOUTS.get(eng.timeout_key, 600)
         pct = 8 + int(84 * chain.index(name) / max(1, len(chain)))
         await say(pct, f"{eng.label} · step {chain.index(name) + 1}/{len(chain)}")
         t0 = time.time()
         try:
-            outcome = await eng.run(job_dir, input_path, trace, budget)
+            outcome = await eng.run(job_dir, input_path, trace, budget_e)
         except Exception as exc:  # engine crash must not kill the job
             attempts.append(Attempt(name, False, f"crash: {exc}", time.time() - t0))
             continue
@@ -205,31 +239,41 @@ async def run_job(input_path: str, trace: bool = False,
                                     time.time() - t0))
             continue
         body = decode(open(outcome.main, "rb").read())
-        if 'error("devirt:' in body and _code_lines(body) < 20:
-            attempts.append(Attempt(name, False,
-                                    "devirt placeholder in output",
-                                    time.time() - t0))
-            continue
-        if _code_lines(body) == 0:
-            attempts.append(Attempt(name, False, "no code lines",
-                                    time.time() - t0))
-            continue
-        if len(raw) > 262144 and _code_lines(body) < 20:
+        q = quality.assess(body, await _parses(outcome.main), outcome.partial)
+        if len(raw) > 262144 and q.code_lines < quality.MIN_CODE_LINES:
             attempts.append(Attempt(name, False,
                                     "truncated: large input, "
-                                    f"{_code_lines(body)} code lines",
+                                    f"{q.code_lines} code lines",
                                     time.time() - t0))
             continue
-        attempts.append(Attempt(name, True, outcome.note, time.time() - t0))
+        if not q.acceptable:
+            attempts.append(Attempt(name, False, q.reason, time.time() - t0))
+            continue
+        attempts.append(Attempt(name, True, outcome.note or q.reason,
+                                time.time() - t0))
+        if best is None or q.score > best[0]:
+            cand_n += 1
+            best = (q.score, name, outcome, q,
+                    _snapshot(job_dir, cand_n, outcome))
+        # Stop when the lift is complete, or when the engine that owns this
+        # fingerprint returned a hole-free result: nothing later in the chain
+        # has a better claim on it.
+        if q.complete or (name == det.engine and q.placeholders == 0):
+            break
+
+    if best is not None:
+        _, name, outcome, q, cand = best
         await say(100, "artifact ready")
-        note = await _syntax_note(outcome.main) or outcome.note
-        _relocate(job_dir, outcome)
+        _relocate(cand, outcome)
         result.ok = True
         result.engine = name
         result.main = outcome.main
-        result.note = note
         result.partial = outcome.partial
-        result.artifacts = list(dict.fromkeys(outcome.artifacts + _gather_extra(job_dir, outcome.main)))
+        result.quality = q
+        result.note = outcome.note or q.reason or (
+            "" if q.complete else "best available lift")
+        result.artifacts = list(dict.fromkeys(
+            outcome.artifacts + _gather_extra(cand, outcome.main)))
         result.seconds = time.time() - started
         try:
             body = decode(open(outcome.main, "rb").read())
@@ -283,6 +327,14 @@ async def _write_reports(job_dir: str, result: JobResult) -> None:
         },
         "risk": result.analysis.risk if result.analysis else None,
         "partial": result.partial,
+        "quality": None if result.quality is None else {
+            "score": result.quality.score,
+            "code_lines": result.quality.code_lines,
+            "parses": result.quality.parses,
+            "placeholders": result.quality.placeholders,
+            "complete": result.quality.complete,
+            "report": result.quality.report,
+        },
         "seconds": round(result.seconds, 1),
         "attempts": [
             {"engine": a.engine, "ok": a.ok, "note": a.note,

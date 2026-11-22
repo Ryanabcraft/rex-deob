@@ -72,6 +72,27 @@ what the script did instead of source. If even that fails, `strings` returns
 the literals, URLs and decoded payloads the script carries, so an unknown
 obfuscator never produces an empty reply. The reply always names the family.
 
+## Result quality
+
+Every engine output is scored before it is allowed to end the job
+(`core/quality.py`). The pipeline no longer ships the first thing that comes
+back: it holds the best candidate and keeps walking the chain while a better one
+is still possible.
+
+| signal | effect |
+|---|---|
+| code lines (comments excluded) | the main weight; more structure wins |
+| parses with `luau-ast` | bonus — a lift that does not parse is still valid Lua 5.1 |
+| `error("devirt: …")` / unlifted markers | penalty, and the lift can never be *complete* |
+| engine declared `partial` | no completion bonus, and the chain keeps looking |
+| literal/behaviour dump (`strings`, `unveilr`) | scored as a report, never as source |
+
+The chain stops early when the result is structurally complete, or when the
+engine that owns the detected fingerprint returns a hole-free lift — nothing
+later has a better claim on that family. A partial result is still delivered
+when no engine does better, but it is labelled `Partial`, the Discord embed
+shows the score, and `job.json` records it.
+
 ## Tests
 
 `tests/corpus/` holds labelled samples per family and `tests/run_corpus.py`
@@ -83,6 +104,7 @@ measures the engines, skipping the universal fallbacks:
 .\.venv\Scripts\python.exe tests\run_corpus.py --write
 .\.venv\Scripts\python.exe tests\run_corpus.py -f wearedevs
 .\.venv\Scripts\python.exe tests\run_terrorlua.py --per-family 3 --max-kb 200
+.\.venv\Scripts\python.exe tests\test_quality.py
 ```
 
 ## Requirements

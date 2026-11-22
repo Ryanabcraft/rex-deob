@@ -45,6 +45,7 @@ async def run_one(family: str, path: str, expect: str | None) -> dict:
         "seconds": round(time.time() - t0, 1),
         "lines": res.analysis.lines if res.analysis else 0,
         "bytes": res.analysis.bytes if res.analysis else 0,
+        "quality": round(res.quality.score, 3) if res.quality else None,
         "note": (res.note or "")[:160],
     }
     if expect is None:
@@ -79,13 +80,15 @@ async def main(args: argparse.Namespace) -> int:
             items.append((family, os.path.join(folder, name), expect))
 
     print(f"{'family':<14} {'file':<34} {'verdict':<16} {'engine':<12} "
-          f"{'s':>6} {'lines':>6}")
-    print("-" * 100)
+          f"{'s':>6} {'lines':>6} {'q':>5}")
+    print("-" * 108)
     for family, path, expect in items:
         row = await run_one(family, path, expect)
         rows.append(row)
+        q = row["quality"]
         print(f"{row['family']:<14} {row['file'][:34]:<34} {row['verdict']:<16} "
-              f"{str(row['engine']):<12} {row['seconds']:>6} {row['lines']:>6}")
+              f"{str(row['engine']):<12} {row['seconds']:>6} {row['lines']:>6} "
+              f"{(f'{q:.2f}' if q is not None else '-'):>5}")
 
     fails = [r for r in rows if r["verdict"] == "FAIL"]
     gaps = [r for r in rows if r["verdict"].startswith("GAP")]
