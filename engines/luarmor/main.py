@@ -73,16 +73,16 @@ def cmd_probe(args):
         print("error: no such file: %s" % args.file, file=sys.stderr)
         return 1
     report = probe_mod.analyze(args.file)
-    if args.split and report.get("luarmor_client"):
+    if args.split and report.get("kind"):
         probe_mod.split_payload(args.file, args.split, report)
         report["split_dir"] = args.split
     if args.json:
         print(json.dumps(report, indent=2))
     else:
         print(probe_mod.format_report(report))
-        if args.split and report.get("luarmor_client"):
+        if args.split and report.get("kind"):
             print("split:   -> %s (loader.lua / payload.lua / opaque.json)" % args.split)
-    return 0 if report.get("luarmor_client") else 2
+    return 0 if report.get("kind") else 2
 
 
 def main(argv=None):

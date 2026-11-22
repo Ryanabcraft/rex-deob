@@ -19,6 +19,9 @@ SIG_ERRLOG = re.compile(r"writefile\(\s*\"luarmor-error-log\.txt\"")
 SIG_AUTH_HOST = re.compile(r"[a-z]{1,3}\d-roblox-auth\.luarmor\.net")
 SIG_BOOTSTRAP = re.compile(r"ce_like_loadstring_fn")
 SIG_KICK = re.compile(r"Kick\(\s*\"\[Luarmor\]")
+# The public v4 loader stub: a _bsdata0 table plus a "-sephal" module id.
+# It carries none of the client's auth code, so it needs its own class.
+SIG_BSDATA = re.compile(r"_bsdata0\s*=\s*\{")
 
 ALL_SIGS = [
     ("host_or_name", SIG_HOST),
@@ -60,6 +63,70 @@ def detect(source):
     return hits, conf
 
 
+def detect_kind(source):
+    """'loader_stub' | 'client' | None.
+
+    The v4 stub is unambiguous: a _bsdata0 literal plus the -sephal module id
+    the loader hands to the downloaded init chunk.
+    """
+    if SIG_BSDATA.search(source) and re.search(r"[\w]+-sephal", source):
+        return "loader_stub"
+    hits, conf = detect(source)
+    return "client" if conf >= 0.9 else None
+
+
+def escape_lua_string(data):
+    """Bytes -> a Lua 5.1 source literal that round-trips exactly."""
+    out = ['"']
+    for byte in data:
+        if 32 <= byte < 127 and byte not in (0x22, 0x5C):
+            out.append(chr(byte))
+        else:
+            out.append("\\%03d" % byte)
+    out.append('"')
+    return "".join(out)
+
+
+def render_stub_report(source):
+    """The static shape of a v4 loader stub, as a Luau file.
+
+    Nothing here is a lift: the payload only exists after the runtime HttpGet
+    of the init chunk. What is recoverable is the module id, the cache path,
+    the init URL, and the whole _bsdata0 fingerprint table.
+    """
+    from .loader import parse_bsdata0, parse_stub
+
+    stub = parse_stub(source)
+    bsdata = parse_bsdata0(stub["bsdata0_line"])
+    cache_dir = re.search(r'local f,b,a="([^"]+)"', source)
+    cache_salt = re.search(r'local f,b,a="[^"]+","([^"]+)"', source)
+
+    lines = [
+        "-- Luarmor v4 loader stub -- static report (no payload present)",
+        "--",
+        "-- The stub is a 5-line bootstrap. It reads a cached init chunk, else",
+        "-- downloads one, then loadstring(a)(module_id). The script body never",
+        "-- touches this file, so there is nothing to lift without the CDN.",
+        "--",
+        "--   module_id  %s" % stub["module_id"],
+        "--   init_url   %s" % (stub["init_url"] or "-"),
+        "--   cache_dir  %s" % (cache_dir.group(1) if cache_dir else "-"),
+        "--   cache_key  %s" % (cache_salt.group(1) if cache_salt else "-"),
+        "--",
+        "-- _bsdata0: %d entries (%d string, %d integer). The init chunk reads"
+        % (len(bsdata), sum(1 for v in bsdata.values() if isinstance(v, bytes)),
+           sum(1 for v in bsdata.values() if isinstance(v, int))),
+        "-- these as its build fingerprint; they change with every loader build.",
+        "local bsdata0 = {",
+    ]
+    for i in sorted(bsdata):
+        v = bsdata[i]
+        lit = escape_lua_string(v) if isinstance(v, bytes) else str(v)
+        lines.append("    [%d] = %s," % (i, lit))
+    lines += ["}", ""]
+    return "\n".join(lines)
+
+
 def find_payload_start(source):
     """Locate the payload closure: last big ``local`` decl before the VM call,
     or the first getgenv() after the VM call as a fallback marker."""
@@ -82,15 +149,27 @@ def analyze(path):
     path = Path(path)
     source = path.read_text(encoding="utf-8", errors="replace")
     hits, conf = detect(source)
+    kind = detect_kind(source)
     report = {
         "file": str(path),
         "bytes": len(source.encode("utf-8", errors="replace")),
         "lines": source.count("\n") + 1,
-        "luarmor_client": conf >= 0.9,
-        "confidence": conf,
+        "kind": kind,
+        "luarmor_client": kind == "client",
+        "confidence": 1.0 if kind else conf,
         "signature_hits": hits,
     }
-    if conf < 0.9:
+    if kind == "loader_stub":
+        from .loader import parse_bsdata0, parse_stub
+        stub = parse_stub(source)
+        report["module_id"] = stub["module_id"]
+        report["init_url"] = stub["init_url"]
+        report["bsdata0"] = {
+            "count": len(parse_bsdata0(stub["bsdata0_line"])),
+            "note": "build fingerprint read by the init chunk; rotates per build",
+        }
+        return report
+    if not kind:
         return report
 
     pstart = find_payload_start(source)
@@ -137,6 +216,9 @@ def split_payload(path, outdir, report):
     path, outdir = Path(path), Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
     text = path.read_text(encoding="utf-8", errors="replace")
+    if report.get("kind") == "loader_stub":
+        (outdir / "report.lua").write_text(render_stub_report(text), encoding="utf-8")
+        return outdir
     pl = report.get("payload_start_line")
     if pl:
         lines = text.splitlines(keepends=True)
@@ -150,12 +232,20 @@ def split_payload(path, outdir, report):
 def format_report(report):
     """Human-readable one-screen summary of an analyze() report."""
     lines = []
-    verdict = "LUARMOR CLIENT" if report["luarmor_client"] else "not luarmor"
+    kind = report.get("kind")
+    verdict = ("LUARMOR LOADER STUB" if kind == "loader_stub"
+               else "LUARMOR CLIENT" if kind == "client" else "not luarmor")
     lines.append("verdict: %s (confidence %.2f)" % (verdict, report["confidence"]))
     lines.append("file:    %s  (%d bytes, %d lines)"
                  % (report["file"], report["bytes"], report["lines"]))
     lines.append("signs:   %s" % (", ".join(report["signature_hits"]) or "-"))
-    if report["luarmor_client"]:
+    if kind == "loader_stub":
+        lines.append("module:  %s" % report.get("module_id"))
+        lines.append("init:    %s" % (report.get("init_url") or "-"))
+        lines.append("bsdata0: %s entries (build fingerprint, rotates per build)"
+                     % report.get("bsdata0", {}).get("count"))
+        lines.append("payload: runtime only -- loadstring(HttpGet(init))(module_id)")
+    if kind == "client":
         ps = report.get("payload_start_line")
         lines.append("split:   loader 1..%s, payload %s..%s"
                      % ((ps or 1) - 1, ps, report["lines"]))

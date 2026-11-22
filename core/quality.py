@@ -29,7 +29,7 @@ CONTROL = re.compile(r"\b(?:function|if|for|while|repeat|return|and|or|not)\b")
 MIN_CODE_LINES = 20
 
 # Engines whose output is a report about the input, never source.
-REPORT_ENGINES = frozenset({"strings", "unveilr"})
+REPORT_ENGINES = frozenset({"strings", "unveilr", "luarmor"})
 
 
 @dataclass

@@ -3,3 +3,12 @@ work/
 __pycache__/
 *.pyc
 .env
+
+# pipeline output left beside corpus fixtures
+tests/corpus/**/*.deobf.lua
+tests/corpus/**/*.strings.txt
+tests/corpus/**/*.analysis.txt
+tests/corpus/**/*.trace.txt
+
+# playwright MCP scratch
+.playwright-mcp/

@@ -1007,15 +1007,17 @@ class Luarmor(Engine):
         code, to = await _run(cmd, self.dir, log, timeout)
         files = [f for f in glob.glob(os.path.join(outdir, "*")) if os.path.isfile(f)]
         main = None
-        for cand in ("payload.lua", "loader.lua"):
+        for cand in ("payload.lua", "report.lua", "loader.lua"):
             p = os.path.join(outdir, cand)
             if os.path.exists(p):
                 main = p
                 break
         if files:
-            return RunOutcome(bool(files), self.name, main, files,
-                              "" if files else self._tail(log),
-                              extra={"log": log})
+            # A stub or client report is never a lift: keep partial set so the
+            # bench never claims a complete answer it cannot reach offline.
+            return RunOutcome(main is not None, self.name, main, files,
+                              "" if main else self._tail(log),
+                              partial=True, extra={"log": log})
         text = _read(log)
         start = text.find("{")
         report = None
@@ -1025,13 +1027,15 @@ class Luarmor(Engine):
                 report = json.loads(text[start:text.rfind("}") + 1])
             except Exception:
                 report = None
-        if report and (report.get("signature_hits") or report.get("luarmor_client")):
+        if report and report.get("kind"):
             probe = os.path.join(job_dir, "luarmor_probe.json")
             import json
             with open(probe, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2)
-            note = "loader stub classified; the payload needs a live fetch"
-            return RunOutcome(True, self.name, probe, [probe], note,
+            note = ("loader stub classified; the payload needs a live fetch"
+                    if report.get("kind") == "loader_stub"
+                    else "client classified; no embedded VM stage to lift")
+            return RunOutcome(True, self.name, None, [probe], note,
                               partial=True, extra={"log": log})
         return RunOutcome(False, self.name, note=self._tail(log))
 
