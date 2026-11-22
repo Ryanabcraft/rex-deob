@@ -6,14 +6,13 @@ the script was hiding.
 
 ## What is in this repo
 
-The orchestration only: detection, engine adapters, the job pipeline, the
-indicator analyzer, the Discord and CLI front ends, and the test harness.
+Everything needed to run it: the orchestration (detection, engine adapters, the
+job pipeline, the indicator analyzer, the Discord and CLI front ends, the test
+harness) **and** the engine trees in `engines/` plus the bundled binaries in
+`tools/`. Clone, run `install.ps1`, paste a token, and the whole chain works.
 
-`engines/` and `tools/` are **not** included. They hold third-party
-deobfuscators and bundled runtimes (~100 MB) that keep their authors' licenses
-inside each tree. Drop them in place and the adapters pick them up. Without
-them the bot still starts, `--engines` lists exactly what is missing, and only
-the `strings` fallback produces output.
+Each `engines/*` folder comes from its author and keeps its original license
+inside the tree.
 
 ## Commands
 
@@ -92,8 +91,7 @@ copy .env.example .env   # paste DISCORD_TOKEN
 The script builds a Python 3.13 venv, installs `requirements.txt`, and prints
 which engines are ready. Necessary runtimes: **Python 3.10+**, **Node 18+**,
 **.NET 8 runtime**, **Java 8+** (or the bundled lua5.1 decompile path).
-Luau binaries live in `tools/` and inside each engine tree — both folders ship
-with the engine bundle, not with this repository.
+Luau binaries ship in `tools/` and inside each engine tree.
 
 ## CLI
 
@@ -124,10 +122,14 @@ with the engine bundle, not with this repository.
 bot.py              Discord front end
 cli.py              same pipeline without Discord
 core/               detection, adapters, pipeline, analyzer, downloader
-tests/              regression harness (corpus manifest + terrorlua runner)
-install.ps1         venv + dependency setup, engine readiness report
-engines/            (not in this repo) one folder per third-party deobfuscator
-tools/              (not in this repo) luau, luau-ast, luau-compile, luadec
+engines/luraph15/   Luraph v15 / v15.1 deobfuscator
+engines/luraph14/   Luraph v14 / IronBrew engine
+engines/prometheus/ Prometheus / WeAreDevs (pdeobf)
+engines/moonsec/    MoonSec V3 deobfuscator + unluac + lua5.1
+engines/centurion/  Centurion v6 / v6.1 research deobfuscator
+engines/luarmor/    Luarmor loader probe/fetch
+tools/              luau, luau-ast, luau-compile, luadec (Windows)
+tests/              labelled corpus + regression harness
 work/               per-job artifacts (input, output, logs, reports)
 ```
 

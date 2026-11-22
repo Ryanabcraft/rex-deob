@@ -1,0 +1,4 @@
+{
+  "type": "commonjs",
+  "comment": "Marcador de tipo de módulo para el toolkit moonveil21 (upstream). No es parte del toolkit: existe porque el bot usa ESM en su raiz, y sin este marcador Node trataria vendor/luaparse.js (UMD) como ESM y fallaria con 'Cannot set properties of undefined'. Este archivo se puede borrar si el toolkit se usa fuera de una carpeta con package.json type:module."
+}

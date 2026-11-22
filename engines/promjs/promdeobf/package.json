@@ -1,0 +1,9 @@
+{
+  "name": "prometheus-js-deobf",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "dependencies": {
+    "luau-web": "*"
+  }
+}

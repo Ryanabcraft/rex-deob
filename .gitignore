@@ -3,13 +3,3 @@ work/
 __pycache__/
 *.pyc
 .env
-
-# third-party engines and bundled runtimes are not distributed here
-engines/
-tools/
-
-# test samples (third-party obfuscated scripts) and generated reports
-tests/corpus/
-tests/terrorlua/
-tests/report.json
-tests/terrorlua_report.json
