@@ -29,6 +29,11 @@ Every `.l` run returns `script.deobf.lua`, `script.analysis.txt` (webhooks,
 HttpGet, loadstring, fs access…), plus the engine's strings report when it has
 one. Zip uploads are unpacked and the biggest Lua member is used.
 
+Accepted uploads: `.lua`, `.luau`, `.txt`, `.lua5`, `.zip`. Links must be plain
+HTTP(S) resolving to a public address — the downloader refuses private, loopback
+and link-local targets, follows at most 5 redirects, and stops at
+`MAX_FILE_MB`.
+
 ## Engines
 
 | engine | covers | runtime |
@@ -80,18 +85,83 @@ measures the engines, skipping the universal fallbacks:
 .\.venv\Scripts\python.exe tests\run_terrorlua.py --per-family 3 --max-kb 200
 ```
 
-## Install (Windows)
+## Requirements
+
+Windows is the supported host: the bundled engine binaries (`luadec.exe`,
+`luau.exe`, `lune.exe`, `LuaAnalysis.Ironbrew2.exe`, `MoonsecDeobfuscator.exe`)
+are Windows builds. On Linux the bot still starts, but every engine that needs
+one of those binaries reports itself as missing.
+
+| runtime | version | needed by | check |
+|---|---|---|---|
+| Python | 3.10+ (3.13 tested) | everything | `python --version` |
+| Node.js | 18+ | `luraph15`, `prometheus`, `psu`, `luaobfuscator`, `moonveil`, `ironveil` | `node --version` |
+| .NET | 8.0 runtime | `ib2net`, `f77`, `moonsec` | `dotnet --list-runtimes` |
+| Java | 8+ (optional) | `moonsec` fallback decompiler only | `java -version` |
+
+Python packages (`requirements.txt`): `discord.py`, `python-dotenv`, `aiohttp`
+and `luaparser` — the last one is used by the `ironbrew2` engine, not by the bot
+itself.
+
+Everything else ships in the repository: the 25 engine trees in `engines/`, the
+Windows Luau toolchain in `tools/`, `unluac.jar` for MoonSec, and the
+`node_modules` the JS engines need. There is nothing to download after cloning.
+
+Missing runtimes degrade instead of breaking: without Node the chain loses six
+engines, without .NET it loses three. `--engines` names exactly what is missing
+and the pipeline falls through to the next engine instead of failing the job.
+
+## Install
 
 ```powershell
+git clone https://github.com/Ryanabcraft/rex-deob
+cd rex-deob
 powershell -ExecutionPolicy Bypass -File install.ps1
-copy .env.example .env   # paste DISCORD_TOKEN
-.\.venv\Scripts\python.exe bot.py
 ```
 
-The script builds a Python 3.13 venv, installs `requirements.txt`, and prints
-which engines are ready. Necessary runtimes: **Python 3.10+**, **Node 18+**,
-**.NET 8 runtime**, **Java 8+** (or the bundled lua5.1 decompile path).
-Luau binaries ship in `tools/` and inside each engine tree.
+`install.ps1` checks the four runtimes, builds `.venv`, installs
+`requirements.txt`, prints the engine readiness table, and copies `.env.example`
+to `.env` when there is none. It prefers the `py -3` launcher and locates the
+venv interpreter in either `.venv\Scripts\` or `.venv\bin\`, so an msys/git-bash
+`python` on PATH does not break it.
+
+Then paste the token and start it:
+
+```powershell
+notepad .env             # DISCORD_TOKEN=...
+.\start.bat              # or: .\.venv\Scripts\python.exe bot.py
+```
+
+## Discord setup
+
+1. <https://discord.com/developers/applications> → **New Application** → **Bot**.
+2. **Reset Token**, copy it into `.env` as `DISCORD_TOKEN=`.
+3. Under **Privileged Gateway Intents**, enable **MESSAGE CONTENT INTENT**.
+   The bot reads message text to find attachments, links and pasted blocks; with
+   this off it receives empty messages and every command looks ignored.
+4. **OAuth2 → URL Generator**: scope `bot`, permissions `Send Messages`,
+   `Attach Files`, `Embed Links`, `Read Message History`. Open the generated URL
+   and invite the bot.
+5. Start it, then type `.engines` in a channel it can read. Every line should say
+   `ok`; anything else prints the missing file or runtime.
+
+## Troubleshooting
+
+| symptom | cause | fix |
+|---|---|---|
+| `DISCORD_TOKEN missing` | no `.env`, or the value is empty | copy `.env.example`, paste the token |
+| commands do nothing, no error | Message Content intent is off | enable it in the Developer Portal and restart |
+| `engine unavailable: node not found` | Node not on PATH | install Node 18+, reopen the shell |
+| `missing bin/luau.exe`, `missing lua5.1` | engine tree incomplete | re-clone; do not delete files inside `engines/` |
+| `detected X; no engine for it yet` | the family has no engine | expected for Boronide, LPS, MoonVeil 1.x, PSU 5.x — the reply still comes from `unveilr`, then `strings` |
+| `failed: tried …` | every engine in the chain refused the input | run `.detect` first, then set `KEEP_JOBS=1` and read the per-job log |
+| a job takes minutes | Luraph v15 traces and devirtualizes | normal; 500 KB scripts take a few minutes by design |
+| `output does not parse with luau-ast` | the engine emitted Lua 5.1 the Luau parser rejects | informational only, the file is still usable |
+| `venv python not found` | unusual Python install layout | delete `.venv` and rerun `install.ps1` |
+
+Set `KEEP_JOBS=1` in `.env` to keep `work/<job>/` — the input, every engine log,
+`analysis.txt` and `job.json` — after the reply is posted. That is the first
+place to look when an engine refuses a script.
 
 ## CLI
 
