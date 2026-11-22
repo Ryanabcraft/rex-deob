@@ -20,16 +20,18 @@ inside the tree.
 |---|---|
 | `.l` | attachment, reply-to-file, raw link, or pasted code block — detects and deobfuscates |
 | `.get <url>` | downloads the script from the link and deobfuscates |
+| `.full` | same as `.l`, plus `strings.txt`, `analysis.txt` and `trace.txt` |
 | `.trace` | behaviour trace instead of full devirtualization (Luraph 14/15, MoonSec) |
 | `.detect` | fingerprint only, no engine run |
 | `.engines` | engine list + availability |
 | `.help` | command card |
 
-Every `.l` run returns `script.deobf.lua`, `script.analysis.txt` (webhooks,
-HttpGet, loadstring, fs access…), plus the engine's strings report when it has
-one. Zip uploads are unpacked and the biggest Lua member is used.
+Every run returns **one** file: `script.deobf.lua`. The analysis, the recovered
+strings and the recovery report stay in `work/<job>/` and come attached only
+when you ask with `.full`.
 
-Accepted uploads: `.lua`, `.luau`, `.txt`, `.lua5`, `.zip`. Links must be plain
+Accepted uploads: `.lua`, `.luau`, `.txt`, `.lua5`, `.zip`. Zip uploads are
+unpacked and the biggest Lua member is used. Links must be plain
 HTTP(S) resolving to a public address — the downloader refuses private, loopback
 and link-local targets, follows at most 5 redirects, and stops at
 `MAX_FILE_MB`.
@@ -95,10 +97,17 @@ shows the score, and `job.json` records it.
 
 ## Recovery report (`trace.txt`)
 
-Every job — complete or not — ships a `trace.txt` next to the artifact
-(`core/trace.py`). When the lift is partial it is the most useful file in the
-reply: it says what the input is, how far the lift got, and what the script
-carries.
+Every job writes a `trace.txt` next to the artifact (`core/trace.py`), but the
+Discord reply only attaches **the deobfuscated file** — one file, nothing else.
+The side files come back on demand with `.full`:
+
+| command | attachments |
+|---|---|
+| `.l`, `.get`, `.trace` | `deobf.lua` only |
+| `.full` | `deobf.lua` + `strings.txt` + `analysis.txt` + `trace.txt` |
+| any command, no lift at all | `trace.txt` only |
+
+The same files always sit in `work/<job>/` on disk, whatever the command.
 
 ```
 -- recovery report
@@ -137,10 +146,9 @@ decoded payloads: 0
 
 When no engine returns a complete lift, the pipeline also runs the static
 `strings` engine into a scratch directory (`work/<job>/recover/`) purely to fill
-the *recovered* section, and ships the result as `strings.txt`. Nothing is
+the *recovered* section, and keeps the result as `strings.txt`. Nothing is
 executed for that — it is literal, URL and payload extraction from the input
-bytes. If the job fails outright, the reply still carries `trace.txt` and
-`strings.txt` instead of only an error line.
+bytes.
 
 ## Tests
 

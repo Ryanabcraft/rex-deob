@@ -147,12 +147,18 @@ def _summary_embed(res: pipeline.JobResult, source: str) -> discord.Embed:
     return embed
 
 
-def _pack_files(res: pipeline.JobResult, source_name: str) -> list[discord.File]:
+def _pack_files(res: pipeline.JobResult, source_name: str,
+                full: bool = False) -> list[discord.File]:
     stem = _stem(source_name)
     out: list[discord.File] = []
     seen: set[str] = set()
     order = [res.main] if res.main else []
-    order += [a for a in res.artifacts if a != res.main]
+    if full:
+        order += [a for a in res.artifacts if a != res.main]
+    elif not res.main:
+        # Nothing lifted: the recovery report is the only useful file.
+        order = [a for a in res.artifacts
+                 if os.path.basename(a) == "trace.txt"][:1]
     for path in order:
         if not path or path in seen or not os.path.isfile(path):
             continue
@@ -187,7 +193,8 @@ def _pack_files(res: pipeline.JobResult, source_name: str) -> list[discord.File]
 
 
 async def _run_and_send(ctx: commands.Context, trace: bool, force: str | None,
-                        only_detect: bool = False) -> None:
+                        only_detect: bool = False,
+                        full: bool = False) -> None:
     uid = ctx.author.id
     if uid in _running:
         await ctx.reply("your job is still running.")
@@ -262,14 +269,14 @@ async def _run_and_send(ctx: commands.Context, trace: bool, force: str | None,
 
         if not res.ok:
             note = res.note[:1500] or "no engine produced output"
-            files = _pack_files(res, name)
+            files = _pack_files(res, name, full)
             await status.edit(content=f"no complete lift: {note}\nworkdir: `{job_dir}`",
                               embed=None)
             if files:
                 await ctx.reply(files=files)
             return
 
-        files = _pack_files(res, name)
+        files = _pack_files(res, name, full)
         embed = _summary_embed(res, name + (f" · {url}" if url else ""))
         try:
             await status.delete()
@@ -316,6 +323,12 @@ async def trace_cmd(ctx: commands.Context, *, arg: str | None = None) -> None:
     await _run_and_send(ctx, trace=True, force=None)
 
 
+@bot.command(name="full")
+async def full_cmd(ctx: commands.Context, *, arg: str | None = None) -> None:
+    """Deobfuscate and attach the lift plus strings, analysis and trace."""
+    await _run_and_send(ctx, trace=False, force=None, full=True)
+
+
 @bot.command(name="detect")
 async def detect_cmd(ctx: commands.Context, *, arg: str | None = None) -> None:
     """Fingerprint the obfuscator without running an engine."""
@@ -341,6 +354,8 @@ async def help_cmd(ctx: commands.Context) -> None:
         f"**{p}l** — attach a script, reply to one, drop a link or paste a "
         f"code block. Auto-detects the obfuscator and deobfuscates.\n"
         f"**{p}get <url>** — download from a link and deobfuscate.\n"
+        f"**{p}full** — same, but attach `strings.txt`, `analysis.txt` and "
+        f"`trace.txt` as well.\n"
         f"**{p}trace** — behaviour trace only (Luraph 14/15, MoonSec).\n"
         f"**{p}detect** — fingerprint only, no engine run.\n"
         f"**{p}engines** — engine list and availability.\n\n"
