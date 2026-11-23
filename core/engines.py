@@ -1099,6 +1099,8 @@ class Unveilr(Engine):
     timeout_key = "unveilr"
     can_trace = True
     families = ()
+    script = "main.luau"
+    out_prefix = "out="
 
     def __init__(self) -> None:
         self.dir = config.engine("unveilr")
@@ -1106,8 +1108,8 @@ class Unveilr(Engine):
     def available(self) -> tuple[bool, str]:
         if not os.path.exists(os.path.join(self.dir, "lune.exe")):
             return False, "missing lune.exe"
-        if not os.path.exists(os.path.join(self.dir, "main.luau")):
-            return False, "missing main.luau"
+        if not os.path.exists(os.path.join(self.dir, self.script)):
+            return False, f"missing {self.script}"
         return True, ""
 
     async def run(self, job_dir, input_path, trace, timeout) -> RunOutcome:
@@ -1123,8 +1125,8 @@ class Unveilr(Engine):
         log = os.path.join(job_dir, "unveilr.log")
         env = _env({"HOOKOP_BIN": os.path.join(self.dir, "lute.exe")})
         try:
-            cmd = [os.path.join(self.dir, "lune.exe"), "run", "main.luau",
-                   f"bot_tmp/{name}", f"out=bot_tmp/{name}.out"]
+            cmd = [os.path.join(self.dir, "lune.exe"), "run", self.script,
+                   f"bot_tmp/{name}", f"{self.out_prefix}bot_tmp/{name}.out"]
             await _run(cmd, self.dir, log, timeout, env=env)
             if not os.path.exists(produced) or os.path.getsize(produced) < 16:
                 return RunOutcome(False, self.name, note=self._tail(log))
@@ -1147,11 +1149,26 @@ class Unveilr(Engine):
                     pass
 
 
+class Unveilr6(Unveilr):
+    """The 6Vms rewrite of the tracer, run from the same engine dir.
+
+    Newer executor env (apidump-backed classes, buffer stubs) and much faster;
+    its output is a behaviour reconstruction, so the pipeline scores it against
+    the old tracer and keeps whichever lifts better.
+    """
+
+    name = "unveilr6"
+    label = "unveilr 6Vms (universal trace)"
+    order = 91
+    script = "main6.luau"
+    out_prefix = ""
+
+
 ENGINES: dict[str, Engine] = {
     e.name: e for e in (Bytecode(), Luraph15(), Ib1(), Luraph14(), Ib2Net(),
                         Ironbrew2(), Ib3(), Prometheus(), LuaObfuscator(),
                         Moonsec(), Orrxl4(), SynapseXen(), Psu(), Hercules(),
                         MoonVeil(), IronVeil(), F77(), Wyn(), Centurion(),
-                        Luarmor(), Unveilr(), Strings())
+                        Luarmor(), Unveilr(), Unveilr6(), Strings())
 }
 ORDER = sorted(ENGINES.values(), key=lambda e: e.order)

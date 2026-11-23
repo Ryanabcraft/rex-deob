@@ -10,5 +10,9 @@ tests/corpus/**/*.strings.txt
 tests/corpus/**/*.analysis.txt
 tests/corpus/**/*.trace.txt
 
+# engine scratch (lune tracer writes beside its own tree)
+engines/*/bot_tmp/
+engines/unveilr/core/misc/
+
 # playwright MCP scratch
 .playwright-mcp/
