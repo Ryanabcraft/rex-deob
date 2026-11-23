@@ -24,7 +24,7 @@ from core import pipeline  # noqa: E402
 
 CORPUS = os.path.join(HERE, "corpus")
 MANIFEST = os.path.join(HERE, "corpus_manifest.json")
-FALLBACK = {"strings", "unveilr"}
+FALLBACK = {"strings", "unveilr6"}
 # side files the pipeline writes next to a sample; they are not inputs
 SKIP_SUFFIX = (".analysis.txt", ".strings.txt", ".trace.txt", ".deobf.lua")
 

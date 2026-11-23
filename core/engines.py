@@ -1162,7 +1162,7 @@ class Unveilr6(Unveilr):
 
     name = "unveilr6"
     label = "unveilr 6Vms (universal trace)"
-    order = 91
+    order = 90
     script = "main6.luau"
     out_prefix = ""
 
@@ -1172,6 +1172,6 @@ ENGINES: dict[str, Engine] = {
                         Ironbrew2(), Ib3(), Prometheus(), LuaObfuscator(),
                         Moonsec(), Orrxl4(), SynapseXen(), Psu(), Hercules(),
                         MoonVeil(), IronVeil(), F77(), Wyn(), Centurion(),
-                        Luarmor(), Unveilr(), Unveilr6(), Strings())
+                        Luarmor(), Unveilr6(), Strings())
 }
 ORDER = sorted(ENGINES.values(), key=lambda e: e.order)

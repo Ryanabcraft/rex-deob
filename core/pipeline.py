@@ -15,7 +15,7 @@ from .engines import ENGINES, ORDER, RunOutcome, _run
 Progress = Callable[[int, str], Awaitable[None]]
 
 # Generic last-resort engines: only worth running when nothing better exists.
-FALLBACKS = {"unveilr", "strings"}
+FALLBACKS = {"unveilr6", "strings"}
 
 
 @dataclass

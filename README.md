@@ -60,7 +60,7 @@ and link-local targets, follows at most 5 redirects, and stops at
 | `ib3` | IronBrew3 static payload → constants + IR (partial) | python |
 | `centurion` | Centurion v6 / v6.1 (offline, partial when gated) | python + luau tools |
 | `luarmor` | Luarmor loader stubs (probe / fetch) | python |
-| `unveilr` | universal fallback: executor-env trace in Lune, effects rendered back to Luau | lune + luau |
+| `unveilr6` | universal fallback: executor-env trace in Lune (6Vms env, apidump-backed), effects rendered back to Luau | lune + luau |
 | `strings` | last resort, family-agnostic: literals, URLs, decoded payloads (no execution) | python |
 
 Engines only run when their fingerprint matches (or when forced with
@@ -69,7 +69,7 @@ VM. The two detectors that run on every input — Prometheus `pdeobf` and
 LuaObfuscator — are sub-second.
 
 Families without an engine — PSU v5.0A (deobf covers 4.x), Boronide, LPS, and
-MoonVeil 1.x — fall through to the `unveilr` universal trace, which renders
+MoonVeil 1.x — fall through to the `unveilr6` universal trace, which renders
 what the script did instead of source. If even that fails, `strings` returns
 the literals, URLs and decoded payloads the script carries, so an unknown
 obfuscator never produces an empty reply. The reply always names the family.
@@ -87,7 +87,7 @@ is still possible.
 | parses with `luau-ast` | bonus — a lift that does not parse is still valid Lua 5.1 |
 | `error("devirt: …")` / unlifted markers | penalty, and the lift can never be *complete* |
 | engine declared `partial` | no completion bonus, and the chain keeps looking |
-| literal/behaviour dump (`strings`, `unveilr`) | scored as a report, never as source |
+| literal/behaviour dump (`strings`, `unveilr6`) | scored as a report, never as source |
 
 The chain stops early when the result is structurally complete, or when the
 engine that owns the detected fingerprint returns a hole-free lift — nothing
@@ -234,7 +234,7 @@ notepad .env             # DISCORD_TOKEN=...
 | commands do nothing, no error | Message Content intent is off | enable it in the Developer Portal and restart |
 | `engine unavailable: node not found` | Node not on PATH | install Node 18+, reopen the shell |
 | `missing bin/luau.exe`, `missing lua5.1` | engine tree incomplete | re-clone; do not delete files inside `engines/` |
-| `detected X; no engine for it yet` | the family has no engine | expected for Boronide, LPS, MoonVeil 1.x, PSU 5.x — the reply still comes from `unveilr`, then `strings` |
+| `detected X; no engine for it yet` | the family has no engine | expected for Boronide, LPS, MoonVeil 1.x, PSU 5.x — the reply still comes from `unveilr6`, then `strings` |
 | `failed: tried …` | every engine in the chain refused the input | run `.detect` first, then set `KEEP_JOBS=1` and read the per-job log |
 | a job takes minutes | Luraph v15 traces and devirtualizes | normal; 500 KB scripts take a few minutes by design |
 | `output does not parse with luau-ast` | the engine emitted Lua 5.1 the Luau parser rejects | informational only, the file is still usable |

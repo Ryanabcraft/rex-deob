@@ -72,7 +72,7 @@ def download(path: str, dest: str) -> bool:
 
 async def run_one(fam: str, path: str, expect: str | None) -> dict:
     res = await pipeline.run_job(path, max_engine_seconds=90,
-                                 skip_engines={"unveilr", "strings"})
+                                 skip_engines={"unveilr6", "strings"})
     row = {
         "family": fam,
         "file": os.path.basename(path),
