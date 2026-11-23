@@ -19,7 +19,7 @@ inside the tree.
 | command | what it does |
 |---|---|
 | `.l` | attachment, reply-to-file, raw link, or pasted code block — detects and deobfuscates |
-| `.get <url>` | downloads the script from the link and deobfuscates |
+| `.get <url>` | downloads the file from the link, untouched — no engine runs |
 | `.full` | same as `.l`, plus `strings.txt`, `analysis.txt` and `trace.txt` |
 | `.trace` | behaviour trace instead of full devirtualization (Luraph 14/15, MoonSec) |
 | `.detect` | fingerprint only, no engine run |
@@ -103,7 +103,7 @@ The side files come back on demand with `.full`:
 
 | command | attachments |
 |---|---|
-| `.l`, `.get`, `.trace` | `deobf.lua` only |
+| `.l`, `.trace` | `deobf.lua` only |
 | `.full` | `deobf.lua` + `strings.txt` + `analysis.txt` + `trace.txt` |
 | any command, no lift at all | `trace.txt` only |
 

@@ -309,12 +309,25 @@ async def l_cmd(ctx: commands.Context, *, arg: str | None = None) -> None:
 
 @bot.command(name="get")
 async def get_cmd(ctx: commands.Context, *, arg: str | None = None) -> None:
-    """Download a script from a link and deobfuscate it."""
+    """Download a script from a link. No engine runs, nothing is deobfuscated."""
     url = downloader.find_url(arg or ctx.message.content or "")
     if not url:
         await ctx.reply(f"usage: `{config.PREFIX}get <url>`")
         return
-    await _run_and_send(ctx, trace=False, force=None)
+    uid = ctx.author.id
+    now = time.time()
+    wait = config.COOLDOWN_S - (now - _cooldown.get(uid, 0.0))
+    if wait > 0:
+        await ctx.reply(f"cooldown: {wait:.0f}s.")
+        return
+    _cooldown[uid] = now
+    async with ctx.typing():
+        try:
+            data, name = await downloader.fetch(url)
+        except Exception as exc:
+            await ctx.reply(f"{exc}"[:400])
+            return
+    await ctx.reply(file=discord.File(io.BytesIO(data), filename=name))
 
 
 @bot.command(name="trace")
@@ -353,7 +366,8 @@ async def help_cmd(ctx: commands.Context) -> None:
     text = (
         f"**{p}l** — attach a script, reply to one, drop a link or paste a "
         f"code block. Auto-detects the obfuscator and deobfuscates.\n"
-        f"**{p}get <url>** — download from a link and deobfuscate.\n"
+        f"**{p}get <url>** — download the file from a link, unchanged "
+        f"(no deobfuscation).\n"
         f"**{p}full** — same, but attach `strings.txt`, `analysis.txt` and "
         f"`trace.txt` as well.\n"
         f"**{p}trace** — behaviour trace only (Luraph 14/15, MoonSec).\n"
