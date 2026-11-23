@@ -43,7 +43,7 @@ def _sem_literais(texto: str) -> str:
                 out[k] = " "
             i = j
         elif c in ("'", '"'):
-            q = c
+            inicio, q = i, c
             i += 1
             while i < n:
                 if texto[i] == "\\":
@@ -53,6 +53,10 @@ def _sem_literais(texto: str) -> str:
                     i += 1
                     break
                 i += 1
+            # blank the literal itself: leaving it in the mask let the alias
+            # pass rewrite text inside strings
+            for k in range(inicio, min(i, n)):
+                out[k] = " "
         elif c == "[" and texto.startswith("[[", i):
             j = texto.find("]]", i)
             j = n if j < 0 else j + 2
@@ -64,8 +68,25 @@ def _sem_literais(texto: str) -> str:
     return "".join(out)
 
 
+_MASCARA_CACHE: dict[str, str] = {}
+
+
+def _mascara(linha: str) -> str:
+    """`_sem_literais` memoised. The alias pass re-masks every line on every
+    round (up to 400 rounds over a 15 000-line pdeobf output); the mask of a
+    line only depends on that line, so the answer is reused."""
+    m = _MASCARA_CACHE.get(linha)
+    if m is None:
+        if len(_MASCARA_CACHE) > 200_000:
+            _MASCARA_CACHE.clear()
+        m = _MASCARA_CACHE[linha] = _sem_literais(linha)
+    return m
+
+
 def _usos(mascara: str, nome: str) -> list[re.Match]:
     """Ocorrencias de `nome` que NAO sao campo (`x.nome`) nem sufixo."""
+    if not isinstance(nome, str) or not nome:
+        return []
     return list(re.finditer(r"(?<![\w.:])%s(?![\w])" % re.escape(nome), mascara))
 
 
@@ -113,6 +134,19 @@ def _tira_do_end_vazio(linhas: list[str]) -> list[str]:
     return linhas
 
 
+def _tem_uso(codigo: list[str], idx: int, nome: str) -> bool:
+    """`_usos` do arquivo menos a linha `idx`, sem montar o arquivo inteiro.
+
+    The old code joined every line except this one for each declaration, which
+    is O(declarations x file size): a 354 KB pdeobf output spent minutes there.
+    A name cannot span a line break, so scanning line by line is equivalent.
+    """
+    for j, l in enumerate(codigo):
+        if j != idx and nome in l and _usos(l, nome):
+            return True
+    return False
+
+
 def _tira_locais_mortos(linhas: list[str]) -> list[str]:
     """Nome declarado que nao aparece mais no arquivo inteiro nao esta em uso."""
     codigo = _sem_literais("\n".join(linhas)).splitlines()
@@ -126,8 +160,7 @@ def _tira_locais_mortos(linhas: list[str]) -> list[str]:
             saida.append(linha)
             continue
         nomes = [x.strip() for x in m.group(1).split(",")]
-        resto = "\n".join(codigo[:idx] + codigo[idx + 1:])
-        vivos = [n for n in nomes if _usos(resto, n)]
+        vivos = [n for n in nomes if _tem_uso(codigo, idx, n)]
         if not vivos:
             continue
         if len(vivos) != len(nomes):
@@ -145,8 +178,12 @@ def _inline_aliases(linhas: list[str]) -> list[str]:
     estar declarado depois (o inlining mudaria semantica). Sem uso nenhum, a
     linha e' so' um dead store de valor puro e sai direto.
     """
-    for _ in range(400):                      # cada volta inline-a UM (guarda rechecada)
-        codigo = [_sem_literais(l) for l in linhas]
+    # each round re-scans and re-masks every line, so the cost is
+    # rounds x lines. cap the rounds by file size: a 15 000-line pdeobf output
+    # does not need 400 passes, it needs a bounded amount of work.
+    voltas = min(400, max(8, 400_000 // max(1, len(linhas))))
+    for _ in range(voltas):                   # cada volta inline-a UM (guarda rechecada)
+        codigo = [_mascara(l) for l in linhas]
         decl, conta = _declaracoes(codigo)
         impuro = _reatribuidos(codigo, decl)
         saiu = False
@@ -159,7 +196,10 @@ def _inline_aliases(linhas: list[str]) -> list[str]:
                 continue
             if b in decl and not (decl[b][0] < i and decl[b][1] == 0):
                 continue
-            usos = [(j, mm) for j, l in enumerate(codigo) for mm in _usos(l, a) if j != i]
+            # plain substring first: compiling a fresh regex per line is what
+            # made a 1.9 MB pdeobf output block the bot's event loop for minutes
+            usos = [(j, mm) for j, l in enumerate(codigo) if a in l
+                    for mm in _usos(l, a) if j != i]
             if not usos:
                 linhas = linhas[:i] + linhas[i + 1:]   # dead store: valor puro, sai
                 saiu = True
@@ -167,6 +207,9 @@ def _inline_aliases(linhas: list[str]) -> list[str]:
             novas = []
             for j, l in enumerate(linhas):
                 if j == i:
+                    continue
+                if a not in l:
+                    novas.append(l)
                     continue
                 mascara, pos, pedacos = codigo[j], 0, []
                 for mm in _usos(mascara, a):
@@ -185,7 +228,7 @@ def _inline_aliases(linhas: list[str]) -> list[str]:
 
 def _workspace_conhecido(linhas: list[str]) -> list[str]:
     """`local X = game:GetService("Workspace")` -> `local workspace` (global do Luau)."""
-    codigo = [_sem_literais(l) for l in linhas]
+    codigo = [_mascara(l) for l in linhas]
     decl, conta = _declaracoes(codigo)
     if "workspace" in decl:
         return linhas
@@ -265,8 +308,11 @@ def _propaga_copias(linhas: list[str]) -> list[str]:
     (Y e' nome, nao expressao) e sai igual. O limite por declaracao cobre nomes
     `vN` que aparecem em escopos diferentes (o pdeobf reusa a numeracao).
     """
-    for _ in range(300):
-        codigo = [_sem_literais(l) for l in linhas]
+    # same bounded-work rule as _inline_aliases: the loop rebuilds every
+    # index on each round, so cap the rounds by file size
+    voltas = min(300, max(6, 300_000 // max(1, len(linhas))))
+    for _ in range(voltas):
+        codigo = [_mascara(l) for l in linhas]
         decl, _conta = _declaracoes(codigo)
         atrib: dict[str, list[int]] = {}
         for i, linha in enumerate(codigo):
@@ -286,7 +332,8 @@ def _propaga_copias(linhas: list[str]) -> list[str]:
             if x not in decl:
                 # escrita em global (registrador do VM): so' sai se o nome nao
                 # aparece em nenhum outro lugar — dead store puro
-                outros = [j for j in range(len(codigo)) if j != i and _usos(codigo[j], x)]
+                outros = [j for j in range(len(codigo))
+                          if j != i and x in codigo[j] and _usos(codigo[j], x)]
                 if not outros:
                     linhas = linhas[:i] + linhas[i + 1:]
                     mudou = True
@@ -295,7 +342,8 @@ def _propaga_copias(linhas: list[str]) -> list[str]:
             if m is None:
                 # `X = literal` com X local: so' sai se X nao for lido em lugar
                 # nenhum (as outras ocorrencias seriam so' as declaracoes)
-                outros = [j for j in range(len(codigo)) if j != i and _usos(codigo[j], x)]
+                outros = [j for j in range(len(codigo))
+                          if j != i and x in codigo[j] and _usos(codigo[j], x)]
                 decls_x = {
                     j for j in range(len(codigo))
                     if (d := _DECL_NOMES.search(codigo[j]))
@@ -311,14 +359,15 @@ def _propaga_copias(linhas: list[str]) -> list[str]:
                 continue
             limites = [j for j in atrib.get(x, []) + atrib.get(y, []) if j > i]
             limite = min(limites) if limites else len(linhas)
-            usos = [j for j in range(i + 1, limite) if _usos(codigo[j], x)]
+            usos = [j for j in range(i + 1, limite)
+                    if x in codigo[j] and _usos(codigo[j], x)]
             if not usos:
                 linhas = linhas[:i] + linhas[i + 1:]
                 mudou = True
                 break
             novas = []
             for j, l in enumerate(linhas):
-                if j == i or j >= limite or not _usos(codigo[j], x):
+                if j == i or j >= limite or x not in codigo[j] or not _usos(codigo[j], x):
                     novas.append(l)
                     continue
                 mascara, pos, pedacos = codigo[j], 0, []

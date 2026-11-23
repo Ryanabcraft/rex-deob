@@ -148,7 +148,7 @@ class Bytecode(Engine):
         if not ok:
             return RunOutcome(False, self.name, note=self._tail(log))
         from .cleaners import clean_luadec
-        text = clean_luadec(_read(out))
+        text = await asyncio.to_thread(clean_luadec, _read(out))
         if text.strip():
             with open(out, "w", encoding="utf-8", newline="\n") as f:
                 f.write(text)
@@ -340,7 +340,10 @@ class Prometheus(Engine):
             await _run(cmd, self.dir, log, timeout)
             if os.path.exists(out) and os.path.getsize(out) > 16:
                 from .cleaners import clean_pdeobf
-                text = clean_pdeobf(_read(out))
+                # the cleanup is pure CPU over the whole file: on a 1.9 MB pdeobf
+                # output it blocked the event loop long enough for discord.py to
+                # log a blocked heartbeat, so the bot stopped answering
+                text = await asyncio.to_thread(clean_pdeobf, _read(out))
                 if self._code_lines(text):
                     with open(out, "w", encoding="utf-8", newline="\n") as f:
                         f.write(text)
@@ -457,7 +460,7 @@ class Moonsec(Engine):
                                self.dir, log, timeout)
             if os.path.exists(main) and os.path.getsize(main) > 16:
                 from .cleaners import clean_luadec
-                text = clean_luadec(_read(main))
+                text = await asyncio.to_thread(clean_luadec, _read(main))
                 if text.strip():
                     with open(main, "w", encoding="utf-8", newline="\n") as f:
                         f.write(text)
