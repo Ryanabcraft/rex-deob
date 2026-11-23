@@ -240,3 +240,4 @@ See [TECHNICAL.md](TECHNICAL.md) §4 for the complete `DEVIRT_*` / `DEOB_*` list
 | UI / part of the script missing | It's in a sibling VM group — add its seq to `DEVIRT_EXTRA_SEQS` |
 | Script is a key-gated / auth loader | The payload is delivered only after a live auth handshake and cannot be decrypted offline; use `--no-devirt` to see the loader's behaviour |
 | `permission denied` running `bin/luau` on Linux | `chmod +x bin/luau bin/luau-ast` |
+| Closures the run never created lift with empty arguments | Three-level maker: the instrumentation records `__m1..__mN` at each creation, and a closure with no capture falls back to the constants at its creation site (`maker_site`) |

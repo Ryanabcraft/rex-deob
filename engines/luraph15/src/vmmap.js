@@ -507,15 +507,32 @@ function patchEntries(source, filePath, chunkTag) {
       const f3Cap = f3Params.map(nm => `${nm}=${nm}`).join(',');
       const headCode = `local __pv={${f3Cap}};if __PA and __PA.n<8192 then __PA.n=__PA.n+1;__PA[__pv]={__seq=__PA.n,__maker="${tag}@${l2},${c2}",${f3Cap}} end;`;
       edits.push([f3_l0, f3_c0, headCode]);
+      // three-level maker: the middle function's parameters are the numbers the
+      // caller passed. Record them per creation so the lifter can rebuild a
+      // closure the run never made (its __mN never got written).
+      const f2b = (f2.body && f2.body.body) || [];
+      const mIdx = {};
+      (f2.args || []).forEach((a, i) => { if (a.name && a.name !== '...') mIdx[a.name] = i; });
+      const margs = Object.entries(mIdx).map(([nm, i]) => `__PA[__pv].__m${i + 1}=${nm};`).join('');
+      if (f2b.length && margs) {
+        const [f2_l0, f2_c0] = loc(f2b[0]);
+        edits.push([f2_l0, f2_c0, `if __PA and __PA[__pv] and not __PA[__pv].__mn then __PA[__pv].__mn=${(f2.args || []).length};${margs} end;`]);
+      }
       if (kind === 'named') {
         const [r1_l, r1_c] = loc(retStmt);
         const [r2_l, r2_c] = loc(f2Ret);
         edits.push([r1_l, r1_c, `__PF[${uName}]=__pv;__PK[__pv]=${uName};`]);
         edits.push([r2_l, r2_c, `__PF[${zName}]=__pv;__PK[__pv]=${zName};`]);
       } else {
+        const { f1 } = info.curried3;
         const [fn_l1, fn_c1, fn_l2, fn_c2] = loc(f2);
         edits.push([fn_l1, fn_c1, `(function(__mk)__PF[__mk]=__pv;__PK[__pv]=__mk;return __mk end)(`]);
         edits.push([fn_l2, fn_c2, `)`]);
+        if (f1) {
+          const [f1_l1, f1_c1, f1_l2, f1_c2] = loc(f1);
+          edits.push([f1_l1, f1_c1, `(function(__fn)__PF[__fn]=__pv;return __fn end)(`]);
+          edits.push([f1_l2, f1_c2, `)`]);
+        }
       }
       continue;
     }

@@ -593,12 +593,23 @@ class VMModel:
     def upvals_index(self):
         return self.info.get("upvals_index", 2)
 
-    def maker_args(self, vmobj, proto, upvals, cap=None):
+    def maker_args(self, vmobj, proto, upvals, cap=None, site=None):
         n = len(self.maker["args"])
         vals = [None] * max(n, 3)
         if self.info.get("mode") == "dispatch_local" and cap is not None:
             if self.info.get("chain"):
-                return [upvals] * max(n, 3)
+                # three-level makers: the inner maker's real arguments are the
+                # numbers the caller passed, recorded by the instrumentation as
+                # __m1..__mN. A closure the run never created has no capture, so
+                # fall back to the constants at its creation site (maker_site).
+                vals = [upvals] * max(n, 3)
+                for i in range(n):
+                    v = cap.get("__m%d" % (i + 1))
+                    if v is None and site is not None and i < len(site):
+                        v = site[i]
+                    if isinstance(v, (int, float)) and not isinstance(v, bool):
+                        vals[i] = v
+                return vals
             # this build's factory does not take (vmobj, proto, upvals): its
             # real arguments were captured per proto (`__PA[pv]` holds every
             # free name, the parameters included)
@@ -947,7 +958,8 @@ class ProtoLifter:
                         it.exec_block(lstats, env0)
                     except Exception:
                         pass
-        r = it.call_lua(LuaFunc(vm.maker, env0), Multi(vm.maker_args(vmobj, proto, upvals, cap)))
+        site = getattr(self.dump, "maker_site", {}).get(getattr(proto, "tid", None))
+        r = it.call_lua(LuaFunc(vm.maker, env0), Multi(vm.maker_args(vmobj, proto, upvals, cap, site)))
         self.making = False
         f = r.first() if isinstance(r, Multi) else r
         if not isinstance(f, LuaFunc) or f.node is not vm.vm:
@@ -2123,6 +2135,12 @@ class ProtoLifter:
         if isinstance(ups, LTable):
             for i in range(1, ups.length() + 1):
                 entries.append(ups.get(i))
+        if proto.tid is not None:
+            # constants at this closure's creation site: the fallback the
+            # maker needs when the run never actually made this closure
+            sites = self.dump.__dict__.setdefault("maker_site", {})
+            sites.setdefault(proto.tid, [v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+                                         for v in vals])
         c = ClosureExpr(proto, entries)
         c.vm = cvm
         c.shared_cap = getattr(self.dump, "shared_cap", None)

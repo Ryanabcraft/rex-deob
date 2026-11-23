@@ -63,6 +63,20 @@ def patch_entries(source, path):
                          "__PA[__pv]={__seq=__PA.n,__maker=\"%s@%d,%d\",%s} end;"
                          % (f3_cap, tag, l2, c2, f3_cap))
             edits.append((f3_l0, f3_c0, head_code))
+            # three-level maker: record the middle function's parameters (the
+            # numbers the caller passed) per creation, so the lifter can rebuild
+            # a closure the run never made.
+            f2_body = (f2.get("body") or {}).get("body") or []
+            m_idx = {}
+            for i, a in enumerate(f2.get("args") or []):
+                if a.get("name") and a["name"] != "...":
+                    m_idx[a["name"]] = i
+            margs = "".join("__PA[__pv].__m%d=%s;" % (i + 1, nm) for nm, i in m_idx.items())
+            if f2_body and margs:
+                f2_l0, f2_c0, _, _ = vmmap.loc(f2_body[0])
+                edits.append((f2_l0, f2_c0,
+                              "if __PA and __PA[__pv] and not __PA[__pv].__mn then "
+                              "__PA[__pv].__mn=%d;%s end;" % (len(f2.get("args") or []), margs)))
             if c3.get("kind") == "named":
                 r1_l, r1_c, _, _ = vmmap.loc(c3["retStmt"])
                 r2_l, r2_c, _, _ = vmmap.loc(c3["f2Ret"])
@@ -73,6 +87,11 @@ def patch_entries(source, path):
                 fn_l1, fn_c1, fn_l2, fn_c2 = vmmap.loc(f2)
                 edits.append((fn_l1, fn_c1, "(function(__mk)__PF[__mk]=__pv;__PK[__pv]=__mk;return __mk end)("))
                 edits.append((fn_l2, fn_c2, ")"))
+                f1 = c3.get("f1")
+                if f1:
+                    f1_l1, f1_c1, f1_l2, f1_c2 = vmmap.loc(f1)
+                    edits.append((f1_l1, f1_c1, "(function(__fn)__PF[__fn]=__pv;return __fn end)("))
+                    edits.append((f1_l2, f1_c2, ")"))
             continue
         code = " __PF[%s]=%s " % (var, info.get("pf_key", pv))
 
