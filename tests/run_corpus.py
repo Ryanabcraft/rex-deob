@@ -25,6 +25,8 @@ from core import pipeline  # noqa: E402
 CORPUS = os.path.join(HERE, "corpus")
 MANIFEST = os.path.join(HERE, "corpus_manifest.json")
 FALLBACK = {"strings", "unveilr"}
+# side files the pipeline writes next to a sample; they are not inputs
+SKIP_SUFFIX = (".analysis.txt", ".strings.txt", ".trace.txt", ".deobf.lua")
 
 
 def load_manifest() -> dict:
@@ -75,6 +77,8 @@ async def main(args: argparse.Namespace) -> int:
         overrides = cfg.get("files") or {}
         for name in sorted(os.listdir(folder)):
             if not name.lower().endswith((".lua", ".luau", ".txt", ".lua5")):
+                continue
+            if name.lower().endswith(SKIP_SUFFIX):
                 continue
             expect = overrides[name] if name in overrides else cfg.get("engine")
             items.append((family, os.path.join(folder, name), expect))

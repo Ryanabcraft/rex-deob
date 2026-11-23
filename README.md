@@ -295,6 +295,9 @@ work/               per-job artifacts (input, output, logs, reports)
   VM's. A small hub typically reads 100%; a stub whose payload is decrypted
   only inside a live game session stops at the instruction that builds it, and
   no amount of budget fixes that — pass `--game-id` (see `engines/luraph15/SETUP.md`).
+- Compare block counts, not percentages, between two scripts: 100% of a
+  three-function stub is three functions, while 69% of a 36-function hub is
+  13 000 lines of real code with the holes marked in place.
 - MoonSec returns both `deobf.lua` and `deobf.luac` when the decompiler runs.
 - Centurion may report *partial* when a script needs live anti-tamper answers;
   the lift is still sent alongside the trace.
