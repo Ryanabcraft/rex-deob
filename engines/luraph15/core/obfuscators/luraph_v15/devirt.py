@@ -1739,7 +1739,22 @@ class ProtoLifter:
             if id(obj) in self.proto_arrays:
                 if is_sym(v):
                     if os.environ.get("DEVIRT_SYMSTORE"):
-                        print("[symstore] tid=%s key=%r v=%s" % (obj.tid, key, fmt_expr(v)[:300]), file=sys.stderr)
+                        _msg = "[symstore] tid=%s key=%r v=%s" % (obj.tid, key, fmt_expr(v)[:300])
+                        # the lift runs in child processes whose stderr the parent
+                        # swallows; a file path in DEVIRT_SYMSTORE survives it.
+                        _p = os.environ.get("DEVIRT_SYMSTORE_LOG")
+                        if _p:
+                            with open(_p, "a", encoding="utf-8") as _fh:
+                                _fh.write(_msg + "\n")
+                        else:
+                            print(_msg, file=sys.stderr)
+                    if os.environ.get("DEVIRT_SYMSTORE_ALLOW"):
+                        # the block dies here otherwise, and every failing block in
+                        # a v15.1 stub dies for this one reason: keep the symbolic
+                        # entry and let the read side decide what it is.
+                        self.mutated = True
+                        obj.set(key, v)
+                        return
                     raise Unsupported("symbolic value store into proto array")
                 self.mutated = True
             if self.ov_base is not None and obj.tid is not None:

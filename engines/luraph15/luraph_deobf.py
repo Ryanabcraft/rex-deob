@@ -119,7 +119,13 @@ def deobf_one(src, dst, opts, passthrough):
                 "rode de novo ou veja SETUP.md (scripts travados por GameId)" % (markers, undecoded))
         return True
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        # the per-proto unlifted list (.report.json) and the chunk dumps live in
+        # the work dir; deleting it turns every failure into another 5 minute
+        # rerun with nothing to read.
+        if os.environ.get("DEOB_KEEP_WORK") == "1":
+            log("[i] work kept: %s" % work)
+        else:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 def main():

@@ -518,10 +518,18 @@ def devirtualize(job, ppath, dpath, cfg, rerun, chunk_paths=(), live=None, run_n
     rec = ""
     if best is not None:
         errors, funcs = best[3]["errors"], best[3]["functions"]
-        total = funcs + errors
+        # Luraph's own runtime helpers are not part of the script: they never had
+        # a source form to recover, so counting them as failures understates the
+        # lift and flags a finished job as partial.
+        runtime_blocks = text.count('error("Luraph runtime function')
+        script_errors = max(0, errors - runtime_blocks)
+        total = funcs + script_errors
         pct = (100.0 * funcs / total) if total else 0.0
-        rec = ("-- recovery: %.0f%% (%d functions lifted, %d blocks unlifted)\n"
-               % (pct, funcs, errors))
+        rec = ("-- recovery: %.0f%% (%d functions lifted, %d blocks unlifted"
+               % (pct, funcs, script_errors))
+        if runtime_blocks:
+            rec += ", %d runtime blocks not lifted" % runtime_blocks
+        rec += ")\n"
     notes = "".join(n + "\n" for n in run_notes)
     job.write(dpath, prefix + rec + notes + devirt.finish_text(text) + "\n")
     # what happened in this job: the bot's verdict, the bench and the logs read it
