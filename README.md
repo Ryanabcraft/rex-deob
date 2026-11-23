@@ -266,6 +266,8 @@ place to look when an engine refuses a script.
 | `JOB_TIMEOUT_S` | 1200 | whole-job cap |
 | `KEEP_JOBS` | 0 | `0` deletes the job folder after the reply is posted |
 | `TIMEOUT_LURAPH15` | 900 | per-engine budgets (`TIMEOUT_*`) |
+| `DEVIRT_SYMSTORE_ALLOW` | unset | v15.1 only: keep a symbolic value that lands in a proto array instead of aborting the block — lifts the v15.1 stub further, stops the plain v15 lift |
+| `DEVIRT_SYMSTORE` · `DEVIRT_SYMSTORE_LOG` | unset | log every symbolic proto-array store (to stderr, or to the file named in `_LOG`) |
 
 ## Layout
 
@@ -298,6 +300,11 @@ work/               per-job artifacts (input, output, logs, reports)
 - Compare block counts, not percentages, between two scripts: 100% of a
   three-function stub is three functions, while 69% of a 36-function hub is
   13 000 lines of real code with the holes marked in place.
+- Luraph v15.1 writes almost every handler result through a proto array slot
+  (`O[5] = l`), so a symbolic value landing there aborts the block by design.
+  `DEVIRT_SYMSTORE_ALLOW=1` keeps it instead: on `luraph151_stub.lua` that is
+  53 -> 22 placeholders and `q` 0.50 -> 0.53, but on `+1 Speed Keyboard
+  Escape.lua` the lift stops with `no complete lift`, so it stays opt-in.
 - MoonSec returns both `deobf.lua` and `deobf.luac` when the decompiler runs.
 - Centurion may report *partial* when a script needs live anti-tamper answers;
   the lift is still sent alongside the trace.

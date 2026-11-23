@@ -1761,9 +1761,10 @@ class ProtoLifter:
                         else:
                             print(_msg, file=sys.stderr)
                     if os.environ.get("DEVIRT_SYMSTORE_ALLOW"):
-                        # the block dies here otherwise, and every failing block in
-                        # a v15.1 stub dies for this one reason: keep the symbolic
-                        # entry and let the read side decide what it is.
+                        # measured on both sides: on the v15.1 stub this lifts
+                        # 53 -> 22 placeholders (q 0.50 -> 0.53), but on
+                        # `+1 Speed Keyboard Escape` the engine stops with
+                        # "no complete lift" after 56 s. Opt-in, never default.
                         self.mutated = True
                         obj.set(key, v)
                         return
