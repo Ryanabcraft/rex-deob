@@ -163,6 +163,7 @@ measures the engines, skipping the universal fallbacks:
 .\.venv\Scripts\python.exe tests\run_terrorlua.py --per-family 3 --max-kb 200
 .\.venv\Scripts\python.exe tests\test_quality.py
 .\.venv\Scripts\python.exe tests\test_trace.py
+.\.venv\Scripts\python.exe tests\test_three_maker.py
 ```
 
 ## Requirements
@@ -289,6 +290,11 @@ work/               per-job artifacts (input, output, logs, reports)
   process tree and the next engine in the chain is tried.
 - Luraph v15 is slow by design (sandbox trace + devirtualization): expect
   seconds for small hubs and a few minutes for 500 KB scripts.
+- The recovery header in `trace.txt` separates script blocks from the
+  obfuscator's own runtime blocks, so the percentage is the script's, not the
+  VM's. A small hub typically reads 100%; a stub whose payload is decrypted
+  only inside a live game session stops at the instruction that builds it, and
+  no amount of budget fixes that — pass `--game-id` (see `engines/luraph15/SETUP.md`).
 - MoonSec returns both `deobf.lua` and `deobf.luac` when the decompiler runs.
 - Centurion may report *partial* when a script needs live anti-tamper answers;
   the lift is still sent alongside the trace.
